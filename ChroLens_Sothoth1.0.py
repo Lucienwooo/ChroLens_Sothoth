@@ -105,6 +105,17 @@ class ChroLens_SothothApp(tb.Window):
         self.pic_map = {}
         self.drag_data = {"item": None, "index": None}
         self._stop_flag = threading.Event()
+        self.hotkey_config = {
+            "run": "alt+1",
+            "stop": "alt+2",
+            "add": "alt+3",
+            "script": "f1",
+            "gallery": "f2",
+            "record": "f10",
+            "record_stop": "f9"
+        }
+        self._hotkey_handlers = []  # 新增：儲存熱鍵 handler
+        self.register_hotkeys()
 
         # ====== 上方操作區 ======
         frm_top = tb.Frame(self, padding=(10, 10, 10, 5))
@@ -117,6 +128,9 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_save.grid(row=0, column=2, padx=4)
         self.btn_add = tb.Button(frm_top, text="新增動作", width=16, bootstyle=PRIMARY, command=self.add_action)
         self.btn_add.grid(row=0, column=3, padx=4)
+        # 新增：快捷鍵設定按鈕
+        self.btn_hotkey = tb.Button(frm_top, text="快捷鍵設定", width=12, bootstyle=WARNING, command=self.open_hotkey_settings)
+        self.btn_hotkey.grid(row=0, column=4, padx=4)
 
         # ====== 腳本選單獨立 row ======
         frm_script = tb.Frame(self, padding=(10, 0, 10, 5))
@@ -488,10 +502,10 @@ class ChroLens_SothothApp(tb.Window):
         delay_script_var = tk.DoubleVar(value=0)
         tb.Entry(frm_script, textvariable=delay_script_var, width=6).pack(side="left", padx=(8, 0))
 
-        # 錄製與停止錄製按鈕（移除快捷鍵顯示與綁定）
+        # 錄製與停止錄製按鈕
         frm_record = tb.Frame(win)
         frm_record.pack(fill="x", padx=10, pady=(12, 0))
-        tb.Button(frm_record, text="錄製", width=14, bootstyle=PRIMARY, command=lambda: self.start_record_script(script_var)).pack(side="left", padx=(0, 8))
+        tb.Button(frm_record, text="錄製", width=14, bootstyle=PRIMARY, command=lambda: self.start_record_script(script_var, script_combo)).pack(side="left", padx=(0, 8))
         tb.Button(frm_record, text="停止錄製", width=14, bootstyle=WARNING, command=self.stop_record_script).pack(side="left")
 
         def on_close():
@@ -735,7 +749,8 @@ class ChroLens_SothothApp(tb.Window):
             "script": "Script",
             "gallery": "圖庫",
             "record": "錄製",
-            "record_stop": "錄製停止"
+            "record_stop": "錄製停止",
+            "hotkey_settings": "快捷鍵設定"  # 新增
         }
         default_hotkeys = {
             "run": "alt+1",
@@ -744,7 +759,8 @@ class ChroLens_SothothApp(tb.Window):
             "script": "f1",
             "gallery": "f2",
             "record": "f10",
-            "record_stop": "f9"
+            "record_stop": "f9",
+            "hotkey_settings": "alt+h"  # 新增
         }
         # 讀取現有設定
         config_path = "config.json"
@@ -812,6 +828,8 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_add.config(text=f"新增動作 ({self.hotkey_config.get('add', 'alt+3')})")
         self.btn_script.config(text=f"Script ({self.hotkey_config.get('script', 'f1')})")
         self.btn_gallery.config(text=f"圖庫 ({self.hotkey_config.get('gallery', 'f2')})")
+        # 可選：在錄製按鈕旁顯示快捷鍵
+        # 你可以在 add_action 裡面錄製按鈕旁加上顯示 hotkey
 
     def open_script_merge(self):
         win = tk.Toplevel(self)
@@ -955,6 +973,14 @@ class ChroLens_SothothApp(tb.Window):
             self.log(f"已刪除第{idx+1}個動作（右鍵）")
 
     def on_close(self):
+        import keyboard
+        # 單獨移除自己註冊的熱鍵
+        if hasattr(self, "_hotkey_handlers"):
+            for handler in self._hotkey_handlers:
+                try:
+                    keyboard.remove_hotkey(handler)
+                except Exception:
+                    pass
         self.save_last_session()
         self.destroy()
 
@@ -994,7 +1020,7 @@ class ChroLens_SothothApp(tb.Window):
             except Exception as e:
                 print(f"自動載入失敗: {e}")
 
-    def start_record_script(self, script_var):
+    def start_record_script(self, script_var, script_combo=None):
         import keyboard
         from pynput.mouse import Controller, Listener
         import pynput.mouse
@@ -1061,8 +1087,19 @@ class ChroLens_SothothApp(tb.Window):
                 time.sleep(0.01)
             mouse_listener.stop()
             k_events = keyboard.stop_recording()
-            # 過濾掉錄製快捷鍵本身
-            filtered_k_events = k_events
+            # === 過濾掉錄製與停止錄製的快捷鍵 ===
+            exclude_hotkeys = [
+                self.hotkey_config.get("record", "f10"),
+                self.hotkey_config.get("record_stop", "f9")
+            ]
+            exclude_keys = set()
+            for hk in exclude_hotkeys:
+                for key in hk.lower().split("+"):
+                    exclude_keys.add(key.strip())
+            filtered_k_events = [
+                e for e in k_events
+                if e.name not in exclude_keys
+            ]
             events = [
                 {'type': 'keyboard', 'event': e.event_type, 'name': e.name, 'time': e.time}
                 for e in filtered_k_events
@@ -1074,11 +1111,20 @@ class ChroLens_SothothApp(tb.Window):
             save_path = os.path.join(SCRIPTS_DIR, filename)
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(all_events, f, ensure_ascii=False, indent=2)
-            # 更新下拉選單
+            # 取得最新腳本清單
             script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
-            script_var.set(os.path.splitext(filename)[0])
+            script_name = os.path.splitext(filename)[0]
+            script_var.set(script_name)
+            # === 直接更新傳入的 Combobox ===
+            if script_combo is not None:
+                script_combo["values"] = script_files
+                script_combo.set(script_name)
+            # 若主視窗也有 script_menu，則同步更新
+            if hasattr(self, "script_menu"):
+                self.script_menu["values"] = script_files
             self.refresh_script_menu()
             self.log(f"錄製Script已儲存：{filename}")
+
         threading.Thread(target=do_record, daemon=True).start()
 
     def on_drag_start(self, event):
@@ -1104,6 +1150,44 @@ class ChroLens_SothothApp(tb.Window):
         self.actions.insert(to_idx, act)
         self.update_tree()
         self.log(f"已將動作從第{from_idx+1}移到第{to_idx+1}")
+
+
+    def register_hotkeys(self):
+        import keyboard
+        # 先移除舊的熱鍵
+        if hasattr(self, "_hotkey_handlers"):
+            for handler in self._hotkey_handlers:
+                try:
+                    keyboard.remove_hotkey(handler)
+                except Exception:
+                    pass
+        self._hotkey_handlers = []
+        # 註冊新的熱鍵
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("run", "alt+1"), lambda: self.run_actions(), suppress=False, trigger_on_release=False)
+        )
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("stop", "alt+2"), lambda: self.stop_actions(), suppress=False, trigger_on_release=False)
+        )
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("add", "alt+3"), lambda: self.add_action(), suppress=False, trigger_on_release=False)
+        )
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("script", "f1"), lambda: self.open_script_merge(), suppress=False, trigger_on_release=False)
+        )
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("gallery", "f2"), lambda: self.open_gallery(), suppress=False, trigger_on_release=False)
+        )
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("record", "f10"), lambda: self.start_record_script(self.script_var), suppress=False, trigger_on_release=False)
+        )
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("record_stop", "f9"), lambda: self.stop_record_script(), suppress=False, trigger_on_release=False)
+        )
+        # 新增：快捷鍵設定熱鍵（預設 alt+h）
+        self._hotkey_handlers.append(
+            keyboard.add_hotkey(self.hotkey_config.get("hotkey_settings", "alt+h"), lambda: self.open_hotkey_settings(), suppress=False, trigger_on_release=False)
+        )
 
 
 if __name__ == "__main__":
