@@ -36,10 +36,10 @@ class Action:
 
 def locate_image_on_screen(template_path, confidence=0.8):
     screenshot = pyautogui.screenshot()
-    screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
+    screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)  # 保持彩色
     try:
         file_bytes = np.fromfile(template_path, dtype=np.uint8)
-        template = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+        template = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)  # 保持彩色
     except Exception as e:
         from tkinter import messagebox
         messagebox.showerror("錯誤", f"無法讀取圖片: {template_path}\n{e}")
@@ -48,6 +48,7 @@ def locate_image_on_screen(template_path, confidence=0.8):
         from tkinter import messagebox
         messagebox.showerror("錯誤", f"無法讀取圖片: {template_path}")
         return None
+    # 彩色比對
     res = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
     if max_val >= confidence:
@@ -117,6 +118,8 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_save.grid(row=0, column=2, padx=4)
         self.btn_add = tb.Button(frm_top, text="新增動作", width=16, bootstyle=PRIMARY, command=self.add_action)
         self.btn_add.grid(row=0, column=3, padx=4)
+        self.btn_hotkey = tb.Button(frm_top, text="快捷鍵", width=8, bootstyle=WARNING, command=self.open_hotkey_settings)
+        self.btn_hotkey.grid(row=0, column=4, padx=4)
 
         # ====== 腳本選單獨立 row ======
         frm_script = tb.Frame(self, padding=(10, 0, 10, 5))
@@ -127,6 +130,20 @@ class ChroLens_SothothApp(tb.Window):
         self.script_menu.pack(side="left", padx=4)
         self.refresh_script_menu()
         self.script_menu.bind("<<ComboboxSelected>>", self.on_script_select)
+
+        # ====== 錄製腳本相關按鈕（新增於腳本選單右側）======
+        btn_record = tb.Button(frm_script, text="開始錄製(F10)", width=12, bootstyle=PRIMARY,
+                               command=lambda: self.start_record_script(self.script_var))
+        btn_record.pack(side="left", padx=(8, 2))
+        btn_stop = tb.Button(frm_script, text="停止錄製(F9)", width=12, bootstyle=WARNING,
+                             command=self.stop_record_script)
+        btn_stop.pack(side="left", padx=(2, 2))
+        btn_open_folder = tb.Button(frm_script, text="開啟資料夾", width=10, bootstyle=SECONDARY,
+                                    command=lambda: os.startfile(SCRIPTS_DIR))
+        btn_open_folder.pack(side="left", padx=(2, 2))
+        btn_rename = tb.Button(frm_script, text="腳本更名", width=10, bootstyle=WARNING,
+                               command=self.rename_script)
+        btn_rename.pack(side="left", padx=(2, 0))
 
         # ====== 主區塊：動作表格與日誌 ======
         frm_main = tb.Frame(self, padding=(10, 5, 10, 5))
@@ -188,12 +205,19 @@ class ChroLens_SothothApp(tb.Window):
         self.status_label = tb.Label(frm_bottom, text="狀態：待命", style="My.TLabel")
         self.status_label.pack(side="left", padx=4)
 
-        # 註冊全域快捷鍵（F6: 執行, F7: 停止）
-        try:
-            keyboard.add_hotkey('F6', lambda: self.run_actions(), suppress=False)
-            keyboard.add_hotkey('F7', lambda: self.stop_actions(), suppress=False)
-        except Exception as e:
-            print(f"全域快捷鍵註冊失敗: {e}")
+        # 預設快捷鍵
+        self.default_hotkeys = {
+            "run": "F6",
+            "stop": "F7",
+            "add": "F8",
+            "script": "F5",
+            "gallery": "F4",
+            "record": "F10",
+            "record_stop": "F9"
+        }
+
+        # 註冊全域快捷鍵
+        self.register_hotkeys()
 
         self.update_tree()
         self.update_idletasks()
@@ -202,7 +226,108 @@ class ChroLens_SothothApp(tb.Window):
         atexit.register(self.save_last_session)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # ====== 功能方法區 ======
+    # ====== 快捷鍵註冊與設定 ======
+    def register_hotkeys(self, config=None):
+        import keyboard
+        # 1. 先移除舊的 hotkey handler
+        if not hasattr(self, "_hotkey_handlers"):
+            self._hotkey_handlers = []
+        for handler in self._hotkey_handlers:
+            try:
+                keyboard.remove_hotkey(handler)
+            except Exception:
+                pass
+        self._hotkey_handlers.clear()
+
+        # 2. 讀取設定
+        if config is None:
+            config_path = "config.json"
+            default_hotkeys = self.default_hotkeys
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            else:
+                config = default_hotkeys.copy()
+
+        # 3. 註冊新 hotkey 並記錄 handler
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("run", "F6"), lambda: self.run_actions(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("stop", "F7"), lambda: self.stop_actions(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("add", "F8"), lambda: self.add_action(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("script", "F5"), lambda: self.open_script_merge(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("gallery", "F4"), lambda: self.open_gallery(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("record", "F10"), lambda: self.start_record_script(self.script_var), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("record_stop", "F9"), lambda: self.stop_record_script(), suppress=False))
+
+    def open_hotkey_settings(self):
+        win = tk.Toplevel(self)
+        win.title("快捷鍵設定")
+        win.geometry("340x320")
+        win.resizable(False, False)
+
+        labels = [
+            ("run", "執行"),
+            ("stop", "停止"),
+            ("add", "新增動作"),
+            ("script", "Script"),
+            ("gallery", "圖庫"),
+            ("record", "錄製"),
+            ("record_stop", "錄製停止")
+        ]
+        config_path = "config.json"
+        default_hotkeys = self.default_hotkeys
+        # 讀取現有設定
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        else:
+            config = default_hotkeys.copy()
+        vars = {}
+        row = 0
+
+        def on_entry_key(event, key, var):
+            keys = []
+            if event.state & 0x0001: keys.append("shift")
+            if event.state & 0x0004: keys.append("ctrl")
+            if event.state & 0x0008: keys.append("alt")
+            key_name = event.keysym.lower()
+            if key_name not in ("shift_l", "shift_r", "control_l", "control_r", "alt_l", "alt_r"):
+                keys.append(key_name)
+            var.set("+".join(keys))
+            return "break"
+
+        def on_entry_focus_in(event, var):
+            var.set("請輸入按鍵")
+
+        def on_entry_focus_out(event, key, var):
+            if var.get() == "請輸入按鍵" or not var.get():
+                var.set(config.get(key, default_hotkeys[key]))
+
+        for key, label in labels:
+            tb.Label(win, text=label, font=("Microsoft JhengHei", 11)).grid(row=row, column=0, padx=10, pady=8, sticky="w")
+            var = tk.StringVar(value=config.get(key, default_hotkeys[key]))
+            entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="normal")
+            entry.grid(row=row, column=1, padx=10)
+            vars[key] = var
+            entry.bind("<KeyRelease>", lambda e, k=key, v=var: on_entry_key(e, k, v))
+            entry.bind("<FocusIn>", lambda e, v=var: on_entry_focus_in(e, v))
+            entry.bind("<FocusOut>", lambda e, k=key, v=var: on_entry_focus_out(e, k, v))
+            row += 1
+
+        def save_and_apply():
+            for key in default_hotkeys:
+                val = vars[key].get()
+                if val and val != "請輸入按鍵":
+                    config[key] = val.lower()
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+            self.register_hotkeys(config)
+            messagebox.showinfo("完成", "快捷鍵設定已儲存")
+            win.destroy()
+
+        tb.Button(win, text="儲存", command=save_and_apply, width=10, bootstyle=SUCCESS).grid(row=row, column=0, columnspan=2, pady=16)
+        win.grab_set()
+
+    # ====== 其餘功能方法區 ======
     def open_gallery(self):
         folder = os.path.abspath(IMAGE_DIR)
         os.startfile(folder)
@@ -230,12 +355,17 @@ class ChroLens_SothothApp(tb.Window):
             data = json.load(f)
         self.actions.clear()
         self.tree.delete(*self.tree.get_children())
-        for item in data:
-            act = Action(item["pic_key"], item["img_path"], item["action"], item["delay"])
-            self.actions.append(act)
-            self.tree.insert("", "end", values=(len(self.actions), act.pic_key, act.action, f"{act.delay:.1f}"))
-        self.script_var.set(script_name)
-        self.log(f"載入腳本：{script_name}")
+        # 判斷是動作腳本還是錄製macro
+        if data and isinstance(data, list) and isinstance(data[0], dict) and "pic_key" in data[0]:
+            # 動作腳本格式
+            for item in data:
+                act = Action(item["pic_key"], item["img_path"], item["action"], item["delay"])
+                self.actions.append(act)
+                self.tree.insert("", "end", values=(len(self.actions), act.pic_key, act.action, f"{act.delay:.1f}"))
+            self.script_var.set(script_name)
+            self.log(f"載入腳本：{script_name}")
+        else:
+            messagebox.showerror("錯誤", "此檔案不是動作腳本格式，無法載入。")
 
     def update_tree(self):
         self.tree.delete(*self.tree.get_children())
@@ -292,116 +422,29 @@ class ChroLens_SothothApp(tb.Window):
         self.log(f"編輯圖片：{pic_key}")
 
     def edit_action(self, act, idx):
-        action_win = tk.Toplevel(self)
-        action_win.title("請輸入動作")
-        tb.Label(action_win, text="請在下方框框內按下你要的鍵盤或滑鼠動作", style="My.TLabel").pack(pady=5)
-        entry = tk.Entry(action_win, width=40, font=("Microsoft JhengHei", 14))
-        entry.pack(padx=10, pady=10)
-        entry.focus_set()
-        action = {"value": None}
-        def on_key(event):
-            action["value"] = event.keysym
-            entry.delete(0, tk.END)
-            entry.insert(0, event.keysym)
-        def on_mouse(event):
-            if event.num == 1:
-                action["value"] = "左鍵點擊"
-                entry.delete(0, tk.END)
-                entry.insert(0, "左鍵點擊")
-            elif event.num == 3:
-                action["value"] = "右鍵點擊"
-                entry.delete(0, tk.END)
-                entry.insert(0, "右鍵點擊")
-            elif event.num == 2:
-                action["value"] = "中鍵點擊"
-                entry.delete(0, tk.END)
-                entry.insert(0, "中鍵點擊")
-        def on_mouse_wheel(event):
-            if event.delta > 0:
-                action["value"] = "滾輪上"
-                entry.delete(0, tk.END)
-                entry.insert(0, "滾輪上")
-            else:
-                action["value"] = "滾輪下"
-                entry.delete(0, tk.END)
-                entry.insert(0, "滾輪下")
-        entry.bind("<KeyPress>", on_key)
-        entry.bind("<Button-1>", on_mouse)
-        entry.bind("<Button-2>", on_mouse)
-        entry.bind("<Button-3>", on_mouse)
-        entry.bind("<MouseWheel>", on_mouse_wheel)
-        def on_ok():
-            if not action["value"]:
-                messagebox.showerror("錯誤", "請輸入動作")
-                return
-            act.action = action["value"]
-            action_win.destroy()
-            self.update_tree()
-            self.log(f"編輯動作：{act.pic_key} - {act.action}")
-        tb.Button(action_win, text="確定", bootstyle=SUCCESS, command=on_ok).pack(pady=5)
-        action_win.grab_set()
-
-    def edit_delay_tree(self, act, idx):
-        new_delay = simpledialog.askfloat("編輯延遲", "請輸入新的延遲秒數", minvalue=0, initialvalue=act.delay)
-        if new_delay is not None:
-            act.delay = new_delay
-            self.update_tree()
-            self.log(f"編輯延遲：{act.pic_key} - {act.action} - {act.delay}秒")
-
-    def add_action_direct(self):
-        pass
-
-    def add_action(self):
         win = tk.Toplevel(self)
-        win.title("新增動作/圖片/Script")
-        win.geometry("540x300")
+        win.title("編輯動作/Script")
+        win.geometry("520x300")
         win.resizable(False, False)
 
-        # 1. 圖片
-        frm_img = tb.Frame(win)
-        frm_img.pack(fill="x", padx=10, pady=(12, 0))
-        tb.Label(frm_img, text="圖片", width=6, anchor="w").pack(side="left")
-        img_var = tk.StringVar()
-        img_entry = tb.Entry(frm_img, textvariable=img_var, width=15, font=("Microsoft JhengHei", 11))
-        img_entry.pack(side="left", fill="x", expand=True)
-        delay_img_var = tk.DoubleVar(value=0)
-        tb.Entry(frm_img, textvariable=delay_img_var, width=6).pack(side="left", padx=(8, 0))
-        # 點擊圖片欄位框觸發選擇
-        def select_img(event=None):
-            path = filedialog.askopenfilename(title="選擇圖片", filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")])
-            if path:
-                img_var.set(path)
-        img_entry.bind("<Button-1>", select_img)
-
-        # 2. 按鍵（只捕捉一個動作：單一鍵盤鍵或滑鼠鍵，且輸入框只顯示不可手動輸入）
+        # 1. 按鍵（捕捉單一鍵盤或滑鼠動作，參考 copy.py 新增動作）
         frm_key = tb.Frame(win)
-        frm_key.pack(fill="x", padx=10, pady=(10, 0))
+        frm_key.pack(fill="x", padx=10, pady=(20, 0))
         tb.Label(frm_key, text="按鍵", width=6, anchor="w").pack(side="left")
-        key_var = tk.StringVar()
-        key_entry = tb.Entry(frm_key, textvariable=key_var, width=15, font=("Microsoft JhengHei", 11), state="readonly")
+        key_var = tk.StringVar(value=act.action)
+        key_entry = tb.Entry(frm_key, textvariable=key_var, width=28, font=("Microsoft JhengHei", 11), state="readonly")
         key_entry.pack(side="left", fill="x", expand=True)
-        delay_key_var = tk.DoubleVar(value=0)
-        tb.Entry(frm_key, textvariable=delay_key_var, width=6).pack(side="left", padx=(8, 0))
 
         import keyboard as kb
         import threading
         import pyautogui
 
-        # 只捕捉一個鍵盤鍵（含win/ctrl/alt/shift/單鍵）
         def on_focus_in(event):
             def listen_key():
                 try:
-                    # --- 新增：如果有選圖片，先移動滑鼠到圖片中央 ---
-                    img_path = img_var.get().strip()
-                    orig_pos = None
-                    moved = False
-                    if img_path and os.path.exists(img_path):
-                        # 搜尋螢幕圖片
-                        pos = locate_image_on_screen(img_path)
-                        if pos:
-                            orig_pos = pyautogui.position()
-                            pyautogui.moveTo(pos)
-                            moved = True
+                    key_entry.config(state="normal")
+                    key_var.set("")
+                    key_entry.config(state="readonly")
                     event_kb = kb.read_event(suppress=True)
                     if event_kb.event_type == "down":
                         name = event_kb.name
@@ -441,22 +484,15 @@ class ChroLens_SothothApp(tb.Window):
                         key_entry.config(state="normal")
                         key_var.set(name)
                         key_entry.config(state="readonly")
-                    # --- 新增：輸入完後，游標移回原位 ---
-                    if moved and orig_pos:
-                        pyautogui.moveTo(orig_pos)
                 except Exception:
                     key_entry.config(state="normal")
                     key_var.set("")
                     key_entry.config(state="readonly")
-            key_entry.config(state="normal")
-            key_var.set("")
-            key_entry.config(state="readonly")
             threading.Thread(target=listen_key, daemon=True).start()
 
         key_entry.bind("<FocusIn>", on_focus_in)
         key_entry.bind("<KeyPress>", lambda e: "break")  # 禁止手動輸入
 
-        # 滑鼠事件（只捕捉一個動作）
         def on_mouse(event):
             key_entry.focus_set()
             key_entry.config(state="normal")
@@ -484,110 +520,97 @@ class ChroLens_SothothApp(tb.Window):
         key_entry.bind("<Button-3>", on_mouse)
         key_entry.bind("<MouseWheel>", on_mouse_wheel)
 
-        # 3. Script
+        # 2. Script
         frm_script = tb.Frame(win)
-        frm_script.pack(fill="x", padx=10, pady=(10, 0))
+        frm_script.pack(fill="x", padx=10, pady=(16, 0))
         tb.Label(frm_script, text="Script", width=6, anchor="w").pack(side="left")
-        script_var = tk.StringVar()
-        script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
-        script_combo = tb.Combobox(frm_script, textvariable=script_var, values=script_files, width=15, state="readonly")
-        script_combo.pack(side="left", fill="x", expand=True)
-        delay_script_var = tk.DoubleVar(value=0)
-        tb.Entry(frm_script, textvariable=delay_script_var, width=6).pack(side="left", padx=(8, 0))
+        script_var = tk.StringVar(value=act.action if act.action.startswith("[SCRIPT]") else "")
+        script_entry = tb.Entry(frm_script, textvariable=script_var, width=20, font=("Microsoft JhengHei", 11), state="readonly")
+        script_entry.pack(side="left", fill="x", expand=True)
+        def open_script_dialog():
+            folder = os.path.abspath(SCRIPTS_DIR)
+            os.startfile(folder)
+        tb.Button(frm_script, text="開啟資料夾", width=10, bootstyle=SECONDARY, command=open_script_dialog).pack(side="left", padx=(8, 0))
 
+        # 3. 修改腳本名稱（移到Script下方)
+        frm_rename = tb.Frame(win)
+        frm_rename.pack(fill="x", padx=10, pady=(10, 0))
+        rename_var = tk.StringVar(value=script_var.get())
+        rename_entry = tb.Entry(frm_rename, textvariable=rename_var, width=20, font=("Microsoft JhengHei", 10))
+        rename_entry.pack(side="left", padx=(0, 6))
+        def do_rename():
+            old_name = script_var.get().replace("[SCRIPT]", "").strip()
+            new_name = rename_var.get().strip()
+            if not old_name or not new_name:
+                messagebox.showwarning("提示", "請輸入新名稱")
+                return
+            if not new_name.endswith('.json'):
+                new_name += '.json'
+            old_path = os.path.join(SCRIPTS_DIR, old_name + ".json") if not old_name.endswith('.json') else os.path.join(SCRIPTS_DIR, old_name)
+            new_path = os.path.join(SCRIPTS_DIR, new_name)
+            if os.path.exists(new_path):
+                messagebox.showwarning("提示", "檔案已存在，請換個名稱")
+                return
+            try:
+                os.rename(old_path, new_path)
+                script_var.set(os.path.splitext(new_name)[0])
+                rename_var.set(os.path.splitext(new_name)[0])
+                self.refresh_script_menu()
+                self.log(f"腳本已更名為：{new_name}")
+            except Exception as e:
+                messagebox.showerror("錯誤", f"更名失敗: {e}")
+        tb.Button(frm_rename, text="修改名稱", width=10, bootstyle=WARNING, command=do_rename).pack(side="left")
+
+        # 4. 錄製功能（只顯示按鈕，不顯示狀態文字）
         frm_record = tb.Frame(win)
-        frm_record.pack(fill="x", padx=10, pady=(12, 0))
-        # 新增全域快捷鍵註冊
-        import keyboard
+        frm_record.pack(fill="x", padx=10, pady=(10, 0))
+        btn_record = tb.Button(frm_record, text="開始錄製(F10)", width=12, bootstyle=PRIMARY, command=lambda: self.start_record_script(script_var, act, idx))
+        btn_record.pack(side="left", padx=(0, 4))
+        btn_stop = tb.Button(frm_record, text="停止錄製(F9)", width=12, bootstyle=WARNING, command=self.stop_record_script)
+        btn_stop.pack(side="left")
+        win.bind("<F10>", lambda e: self.start_record_script(script_var, act, idx))
+        win.bind("<F9>", lambda e: self.stop_record_script())
 
-        # 定義觸發函式
-        def trigger_record():
-            self.start_record_script(script_var)
-        def trigger_stop_record():
-            self.stop_record_script()
+        # 5. 確認/取消按鈕
+        frm_btn = tb.Frame(win)
+        frm_btn.pack(fill="x", padx=10, pady=(20, 12))
+        tb.Button(frm_btn, text="確定", bootstyle=SUCCESS, command=lambda: on_ok(act, key_var, script_var)).pack(side="right", padx=4)
+        tb.Button(frm_btn, text="取消", bootstyle=SECONDARY, command=win.destroy).pack(side="right")
 
-        # 註冊全域快捷鍵（F10: 錄製, F9: 停止錄製）
-        try:
-            keyboard.add_hotkey('f10', trigger_record, suppress=False)
-            keyboard.add_hotkey('f9', trigger_stop_record, suppress=False)
-        except Exception as e:
-            print(f"快捷鍵註冊失敗: {e}")
-
-        # 按鈕顯示快捷鍵
-        tb.Button(frm_record, text="錄製(F10)", width=14, bootstyle=PRIMARY, command=trigger_record).pack(side="left", padx=(0, 8))
-        tb.Button(frm_record, text="停止錄製(F9)", width=14, bootstyle=WARNING, command=trigger_stop_record).pack(side="left")
-
-        def on_close():
-            win.destroy()
-        win.protocol("WM_DELETE_WINDOW", on_close)
-
-        # 新增按鈕
-        def on_add():
-            img_path = img_var.get().strip()
+        def on_ok(act, key_var, script_var):
             key_action = key_var.get().strip()
-            script_name = script_var.get().strip()
-            # 圖片+點擊
-            if img_path and key_action in ("左鍵點擊", "右鍵點擊"):
-                # 如果圖片已經在 images 資料夾內，直接使用，不複製
-                if os.path.dirname(os.path.abspath(img_path)) == os.path.abspath(IMAGE_DIR):
-                    save_path = img_path
-                    base_name = os.path.basename(img_path)
-                    name8 = os.path.splitext(base_name)[0][:8]
-                    ext = os.path.splitext(base_name)[1]
-                    pic_key = os.path.splitext(base_name)[0]
-                else:
-                    pic_num = len(self.pic_map) + 1
-                    base_name = os.path.basename(img_path)
-                    name8 = os.path.splitext(base_name)[0][:8]
-                    ext = os.path.splitext(base_name)[1]
-                    pic_key = f"pic{pic_num}_{name8}"
-                    save_name = f"{pic_key}{ext}"
-                    save_path = os.path.join(IMAGE_DIR, save_name)
-                    if not os.path.exists(save_path):
-                        shutil.copy(img_path, save_path)
-                self.pic_map[pic_key] = save_path
-                act = Action(pic_key, save_path, key_action, delay_img_var.get())
-                self.actions.append(act)
-                self.log(f"新增圖片點擊動作：{pic_key} {key_action} 延遲{delay_img_var.get()}秒")
-            # 單純圖片
-            elif img_path:
-                if os.path.dirname(os.path.abspath(img_path)) == os.path.abspath(IMAGE_DIR):
-                    save_path = img_path
-                    base_name = os.path.basename(img_path)
-                    name8 = os.path.splitext(base_name)[0][:8]
-                    ext = os.path.splitext(base_name)[1]
-                    pic_key = os.path.splitext(base_name)[0]
-                else:
-                    pic_num = len(self.pic_map) + 1
-                    base_name = os.path.basename(img_path)
-                    name8 = os.path.splitext(base_name)[0][:8]
-                    ext = os.path.splitext(base_name)[1]
-                    pic_key = f"pic{pic_num}_{name8}"
-                    save_name = f"{pic_key}{ext}"
-                    save_path = os.path.join(IMAGE_DIR, save_name)
-                    if not os.path.exists(save_path):
-                        shutil.copy(img_path, save_path)
-                self.pic_map[pic_key] = save_path
-                act = Action(pic_key, save_path, "", delay_img_var.get())
-                self.actions.append(act)
-                self.log(f"新增圖片動作：{pic_key} 延遲{delay_img_var.get()}秒")
+            script_action = script_var.get().strip()
+            # Script
+            if script_action.startswith("[SCRIPT]"):
+                act.action = script_action
             # 單純按鍵
             elif key_action:
-                act = Action("", "", key_action, delay_key_var.get())
-                self.actions.append(act)
-                self.log(f"新增按鍵動作：{key_action} 延遲{delay_key_var.get()}秒")
-            # Script
-            elif script_name:
-                act = Action("", "", f"[SCRIPT]{script_name}", delay_script_var.get())
-                self.actions.append(act)
-                self.log(f"新增Script動作：{script_name} 延遲{delay_script_var.get()}秒")
+                act.action = key_action
             else:
                 messagebox.showwarning("提示", "請至少輸入一個動作內容")
                 return
             self.update_tree()
             win.destroy()
-        tb.Button(win, text="新增", bootstyle=SUCCESS, width=12, command=on_add).pack(pady=12)
+            self.log(f"編輯動作：{act.action}")
+
         win.grab_set()
+
+    def edit_delay_tree(self, act, idx):
+        new_delay = simpledialog.askfloat("編輯延遲", "請輸入新的延遲秒數", minvalue=0, initialvalue=act.delay)
+        if new_delay is not None:
+            act.delay = new_delay
+            self.update_tree()
+            self.log(f"編輯延遲：{act.pic_key} - {act.action} - {act.delay}秒")
+
+    def add_action_direct(self):
+        pass
+
+    def add_action(self):
+        # 直接新增一個空白動作到列表
+        act = Action("", "", "", 0.0)
+        self.actions.append(act)
+        self.update_tree()
+        self.log("新增一個空白動作，請在列表中編輯")
 
     def run_actions(self):
         if not self.actions:
@@ -759,393 +782,55 @@ class ChroLens_SothothApp(tb.Window):
         self._recording_script = False
         self.log("已停止錄製")
 
-    def open_hotkey_settings(self):
-        win = tk.Toplevel(self)
-        win.title("快捷鍵設定")
-        win.geometry("340x580")
-        win.resizable(False, False)
-
-        # 功能與預設快捷鍵
-        labels = {
-            "run": "執行",
-            "stop": "停止",
-            "add": "新增動作",
-            "script": "Script",
-            "gallery": "圖庫",
-            "record": "錄製",
-            "record_stop": "錄製停止"
-        }
-        # 讀取現有設定
-        config_path = "config.json"
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        else:
-            config = default_hotkeys.copy()
-        vars = {}
-        row = 0
-
-        def on_entry_key(event, key, var):
-            # 只記錄實際按下的組合鍵或單鍵
-            keys = []
-            if event.state & 0x0001: keys.append("shift")
-            if event.state & 0x0004: keys.append("ctrl")
-            if event.state & 0x0008: keys.append("alt")
-            key_name = event.keysym.lower()
-            if key_name not in ("shift_l", "shift_r", "control_l", "control_r", "alt_l", "alt_r"):
-                keys.append(key_name)
-            var.set("+".join(keys))
-            return "break"
-
-        def on_entry_focus_in(event, var):
-            var.set("請輸入按鍵")
-
-        def on_entry_focus_out(event, key, var):
-            if var.get() == "請輸入按鍵" or not var.get():
-                var.set(config.get(key, default_hotkeys[key]))
-
-        for key, label in labels.items():
-            tb.Label(win, text=label, font=("Microsoft JhengHei", 11)).grid(row=row, column=0, padx=10, pady=8, sticky="w")
-            var = tk.StringVar(value=config.get(key, default_hotkeys[key]))
-            entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="normal")
-            entry.grid(row=row, column=1, padx=10)
-            vars[key] = var
-            # 綁定事件
-            entry.bind("<KeyRelease>", lambda e, k=key, v=var: on_entry_key(e, k, v))
-            entry.bind("<FocusIn>", lambda e, v=var: on_entry_focus_in(e, v))
-            entry.bind("<FocusOut>", lambda e, k=key, v=var: on_entry_focus_out(e, k, v))
-            row += 1
-
-        def save_and_apply():
-            for key in default_hotkeys:
-                val = vars[key].get()
-                if val and val != "請輸入按鍵":
-                    config[key] = val.lower()
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
-            # 更新到 self.hotkey_config
-            self.hotkey_config = config
-            self.register_hotkeys()
-            # 更新主畫面按鈕顯示
-            self.update_hotkey_labels()
-            messagebox.showinfo("完成", "快捷鍵設定已儲存")
-            win.destroy()
-
-        tb.Button(win, text="儲存", command=save_and_apply, width=10, bootstyle=SUCCESS).grid(row=row, column=0, columnspan=2, pady=16)
-        win.grab_set()
-
-    def open_script_merge(self):
-        win = tk.Toplevel(self)
-        win.title("腳本合併工具")
-        win.geometry("600x400")
-        win.resizable(False, False)
-
-        left_frame = tb.Frame(win)
-        left_frame.pack(side="left", fill="y", padx=10, pady=10)
-        tb.Label(left_frame, text="所有腳本", style="My.TLabel").pack()
-        script_files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
-        script_names = [os.path.splitext(f)[0] for f in script_files]
-        listbox_all = tk.Listbox(left_frame, selectmode="extended", width=24)
-        for name in script_names:
-            listbox_all.insert(tk.END, name)
-        listbox_all.pack(fill="y", expand=True)
-
-        btn_frame = tb.Frame(win)
-        btn_frame.pack(side="left", fill="y", padx=5)
-        btn_add = tb.Button(btn_frame, text="加入 →")
-        btn_add.pack(pady=10)
-        btn_remove = tb.Button(btn_frame, text="← 移除")
-        btn_remove.pack(pady=10)
-        # 新增紅色刪除按鈕
-        btn_delete = tb.Button(btn_frame, text="刪除腳本", bootstyle="danger", width=10)
-        btn_delete.pack(pady=20)
-
-        right_frame = tb.Frame(win)
-        right_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-        tb.Label(right_frame, text="合併清單", style="My.TLabel").pack()
-        listbox_merge = tk.Listbox(right_frame, selectmode="extended", width=24)
-        listbox_merge.pack(fill="both", expand=True)
-
-        entry_name = tk.Entry(win, width=24)
-        entry_name.pack(side="left", padx=10)
-        btn_merge_save = tb.Button(win, text="合併並儲存", width=14)
-        btn_merge_save.pack(side="left", padx=10)
-
-        merge_items = []
-
-        def on_delete():
-            selected = listbox_all.curselection()
-            if not selected:
-                messagebox.showwarning("提示", "請先選擇要刪除的腳本")
-                return
-            names = [listbox_all.get(i) for i in selected]
-            confirm = messagebox.askyesno("確認", f"確定要刪除這些腳本嗎？\n{', '.join(names)}")
-            if not confirm:
-                return
-            for name in names:
-                path = os.path.join(SCRIPTS_DIR, name + ".json")
-                try:
-                    os.remove(path)
-                except Exception as e:
-                    messagebox.showerror("錯誤", f"刪除失敗：{name}\n{e}")
-            refresh_all_list()
-            self.refresh_script_menu()
-            self.log(f"已刪除腳本：{', '.join(names)}")
-
-        def refresh_merge_list():
-            listbox_merge.delete(0, tk.END)
-            for name in merge_items:
-                listbox_merge.insert(tk.END, name)
-
-        def refresh_all_list():
-            listbox_all.delete(0, tk.END)
-            script_files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
-            script_names = [os.path.splitext(f)[0] for f in script_files]
-            for name in script_names:
-                listbox_all.insert(tk.END, name)
-
-        def on_add():
-            selected = listbox_all.curselection()
-            for i in selected:
-                name = listbox_all.get(i)
-                if name not in merge_items:
-                    merge_items.append(name)
-            refresh_merge_list()
-
-        def on_remove():
-            selected = list(listbox_merge.curselection())
-            for i in reversed(selected):
-                merge_items.pop(i)
-            refresh_merge_list()
-
-        def on_merge_save():
-            new_name = entry_name.get().strip()
-            if not new_name:
-                messagebox.showerror("錯誤", "請輸入新腳本名稱")
-                return
-            merged = []
-            for name in merge_items:
-                path = os.path.join(SCRIPTS_DIR, name + ".json")
-                with open(path, "r", encoding="utf-8") as f:
-                    merged += json.load(f)
-            save_path = os.path.join(SCRIPTS_DIR, new_name + ".json")
-            if os.path.exists(save_path):
-                messagebox.showerror("錯誤", "檔案已存在，請換個新名稱")
-                return
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(merged, f, ensure_ascii=False, indent=2)
-            self.refresh_script_menu()
-            self.script_var.set(new_name)
-            self.log(f"合併並儲存腳本：{new_name}")
-            win.destroy()
-
-        btn_add.config(command=on_add)
-        btn_remove.config(command=on_remove)
-        btn_merge_save.config(command=on_merge_save)
-        btn_delete.config(command=on_delete)
-        win.grab_set()
-
-    def save_actions(self):
-        if not self.actions:
-            messagebox.showinfo("提示", "目前沒有動作可存檔")
+    # ====== 腳本更名功能 ======
+    def rename_script(self):
+        old_name = self.script_var.get().replace("[SCRIPT]", "").strip()
+        if not old_name:
+            messagebox.showwarning("提示", "請先選擇要更名的腳本")
             return
-        # 取得目前腳本名稱，預設填入
-        current_name = self.script_var.get()
-        name = simpledialog.askstring("存檔", "請輸入檔案名稱：", initialvalue=current_name)
-        if not name:
+        new_name = simpledialog.askstring("腳本更名", "請輸入新名稱：", initialvalue=old_name)
+        if not new_name:
             return
-        save_path = os.path.join(SCRIPTS_DIR, name + ".json")
-        # 直接覆蓋，不再提示重複
-        data = [
-            {
-                "pic_key": act.pic_key,
-                "img_path": act.img_path,
-                "action": act.action,
-                "delay": act.delay
-            }
-            for act in self.actions
-        ]
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        self.refresh_script_menu()
-        self.script_var.set(name)
-        self.log(f"儲存腳本：{name}")
-
-    def on_tree_delete(self, event):
-        # 取得所有選取的項目
-        selected = self.tree.selection()
-        if not selected:
+        if not new_name.endswith('.json'):
+            new_name += '.json'
+        old_path = os.path.join(SCRIPTS_DIR, old_name + ".json") if not old_name.endswith('.json') else os.path.join(SCRIPTS_DIR, old_name)
+        new_path = os.path.join(SCRIPTS_DIR, new_name)
+        if os.path.exists(new_path):
+            messagebox.showwarning("提示", "檔案已存在，請換個名稱")
             return
-        # 取得要刪除的索引（反向排序，避免刪除時索引錯亂）
-        idxs = sorted([int(self.tree.item(item, "values")[0]) - 1 for item in selected], reverse=True)
-        for idx in idxs:
-            if 0 <= idx < len(self.actions):
-                del self.actions[idx]
-        self.update_tree()
-        self.log(f"已刪除 {len(idxs)} 個動作")
-
-    def on_tree_right_click(self, event):
-        item = self.tree.identify_row(event.y)
-        if not item:
-            return
-        idx = int(self.tree.item(item, "values")[0]) - 1
-        if 0 <= idx < len(self.actions):
-            del self.actions[idx]
-            self.update_tree()
-            self.log(f"已刪除第{idx+1}個動作（右鍵）")
-
-    def on_close(self):
-        self.save_last_session()
-        self.destroy()
-
-    def save_last_session(self):
         try:
-            data = {
-                "actions": [
-                    {
-                        "pic_key": act.pic_key,
-                        "img_path": act.img_path,
-                        "action": act.action,
-                        "delay": act.delay
-                    }
-                    for act in self.actions
-                ],
-                "pic_map": self.pic_map,
-                "script_var": self.script_var.get() if hasattr(self, "script_var") else "",
-            }
-            with open(LAST_SESSION_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"自動儲存失敗: {e}")
-
-    def load_last_session(self):
-        if os.path.exists(LAST_SESSION_FILE):
-            try:
-                with open(LAST_SESSION_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self.actions.clear()
-                for item in data.get("actions", []):
-                    act = Action(item["pic_key"], item["img_path"], item["action"], item["delay"])
-                    self.actions.append(act)
-                self.pic_map = data.get("pic_map", {})
-                if hasattr(self, "script_var") and data.get("script_var"):
-                    self.script_var.set(data["script_var"])
-                self.update_tree()
-            except Exception as e:
-                print(f"自動載入失敗: {e}")
-
-    def start_record_script(self, script_var):
-        import keyboard
-        from pynput.mouse import Controller, Listener
-        import pynput.mouse
-        import datetime
-
-        self._recording_script = True
-        self._recorded_events = []
-        self._mouse_events = []
-        self._record_start_time = time.time()
-        mouse_ctrl = Controller()
-        last_pos = mouse_ctrl.position
-
-        def now_abs():
-            return time.time()
-
-        def on_click(x, y, button, pressed):
-            if self._recording_script:
-                self._mouse_events.append({
-                    'type': 'mouse',
-                    'event': 'down' if pressed else 'up',
-                    'button': str(button).replace('Button.', ''),
-                    'x': x,
-                    'y': y,
-                    'time': now_abs()
-                })
-        def on_scroll(x, y, dx, dy):
-            if self._recording_script:
-                self._mouse_events.append({
-                    'type': 'mouse',
-                    'event': 'wheel',
-                    'delta': dy,
-                    'x': x,
-                    'y': y,
-                    'time': now_abs()
-                })
-        mouse_listener = pynput.mouse.Listener(
-            on_click=on_click,
-            on_scroll=on_scroll
-        )
-        mouse_listener.start()
-        self._mouse_events.append({
-            'type': 'mouse',
-            'event': 'move',
-            'x': last_pos[0],
-            'y': last_pos[1],
-            'time': now_abs()
-        })
-
-        def do_record():
-            nonlocal last_pos
-            keyboard.start_recording()
-            while self._recording_script:
-                pos = mouse_ctrl.position
-                now = now_abs()
-                if pos != last_pos:
-                    self._mouse_events.append({
-                        'type': 'mouse',
-                        'event': 'move',
-                        'x': pos[0],
-                        'y': pos[1],
-                        'time': now
-                    })
-                    last_pos = pos
-                time.sleep(0.01)
-            mouse_listener.stop()
-            k_events = keyboard.stop_recording()
-            # 過濾掉錄製快捷鍵本身
-            filtered_k_events = k_events
-            events = [
-                {'type': 'keyboard', 'event': e.event_type, 'name': e.name, 'time': e.time}
-                for e in filtered_k_events
-            ] + self._mouse_events
-            all_events = sorted(events, key=lambda e: e['time'])
-            # 存檔
-            ts = datetime.datetime.now().strftime("%Y_%m%d_%H%M_%S")
-            filename = f"script_{ts}.json"
-            save_path = os.path.join(SCRIPTS_DIR, filename)
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(all_events, f, ensure_ascii=False, indent=2)
-            # 更新下拉選單
-            script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
-            script_var.set(os.path.splitext(filename)[0])
+            os.rename(old_path, new_path)
             self.refresh_script_menu()
-            self.log(f"錄製Script已儲存：{filename}")
-        threading.Thread(target=do_record, daemon=True).start()
+            self.script_var.set(os.path.splitext(new_name)[0])
+            self.log(f"腳本已更名為：{new_name}")
+        except Exception as e:
+            messagebox.showerror("錯誤", f"更名失敗: {e}")
 
-    def on_drag_start(self, event):
-        item = self.tree.identify_row(event.y)
-        if item:
-            self.drag_data = {"item": item, "index": self.tree.index(item)}
-        else:
-            self.drag_data = {"item": None, "index": None}
-
-    def on_drag_motion(self, event):
-        pass  # 可選：可視化拖曳效果
-
-    def on_drag_drop(self, event):
-        if not self.drag_data.get("item"):
-            return
-        target_item = self.tree.identify_row(event.y)
-        if not target_item or target_item == self.drag_data["item"]:
-            return
-        from_idx = self.drag_data["index"]
-        to_idx = self.tree.index(target_item)
-        # 交換 self.actions 順序
-        act = self.actions.pop(from_idx)
-        self.actions.insert(to_idx, act)
-        self.update_tree()
-        self.log(f"已將動作從第{from_idx+1}移到第{to_idx+1}")
-
-
-if __name__ == "__main__":
-    app = ChroLens_SothothApp()
-    app.mainloop()
+    # ====== 註冊全域快捷鍵 ======
+    def register_hotkeys(self, config=None):
+        import keyboard
+        if not hasattr(self, "_hotkey_handlers"):
+            self._hotkey_handlers = []
+        for handler in self._hotkey_handlers:
+            try:
+                keyboard.remove_hotkey(handler)
+            except Exception:
+                pass
+        self._hotkey_handlers.clear()
+        # 讀取設定
+        if config is None:
+            config_path = "config.json"
+            default_hotkeys = self.default_hotkeys
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            else:
+                config = default_hotkeys.copy()
+        # 註冊新 hotkey 並記錄 handler
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("run", "F6"), lambda: self.run_actions(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("stop", "F7"), lambda: self.stop_actions(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("add", "F8"), lambda: self.add_action(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("script", "F5"), lambda: self.open_script_merge(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("gallery", "F4"), lambda: self.open_gallery(), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("record", "F10"), lambda: self.start_record_script(self.script_var), suppress=False))
+        self._hotkey_handlers.append(keyboard.add_hotkey(config.get("record_stop", "F9"), lambda: self.stop_record_script(), suppress=False))

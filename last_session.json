@@ -1,0 +1,24 @@
+{
+  "actions": [
+    {
+      "pic_key": "",
+      "img_path": "",
+      "action": "",
+      "delay": 0.0
+    },
+    {
+      "pic_key": "",
+      "img_path": "",
+      "action": "",
+      "delay": 0.0
+    },
+    {
+      "pic_key": "",
+      "img_path": "",
+      "action": "",
+      "delay": 0.0
+    }
+  ],
+  "pic_map": {},
+  "script_var": ""
+}
