@@ -32,7 +32,7 @@ if not os.path.exists(SCRIPTS_DIR):
     os.makedirs(SCRIPTS_DIR)
 
 class Action:
-    def __init__(self, pic_key, img_path, action, delay=1.0):
+    def __init__(self, pic_key, img_path, action, delay=1.1):
         self.pic_key = pic_key
         self.img_path = img_path
         self.action = action
@@ -103,7 +103,7 @@ def mouse_event_win(event, x=0, y=0, button='left', delta=0):
 class ChroLens_SothothApp(tb.Window):
     def __init__(self):
         super().__init__(themename="superhero")
-        self.title("ChroLens_Sothoth1.0")
+        self.title("ChroLens_Sothoth1.1")
         self.resizable(False, False)
         self.actions = []
         self.pic_map = {}
@@ -322,8 +322,7 @@ class ChroLens_SothothApp(tb.Window):
         key_var = tk.StringVar(value=act.action)
         key_entry = tb.Entry(frm_key, textvariable=key_var, width=20, font=("Microsoft JhengHei", 12), state="readonly")
         key_entry.pack(side="left", fill="x", expand=True)
-        delay_key_var = tk.DoubleVar(value=act.delay)
-        tb.Entry(frm_key, textvariable=delay_key_var, width=8).pack(side="left", padx=(8, 0))
+        # 已移除延遲輸入框
 
         import keyboard as kb
         import threading
@@ -393,8 +392,7 @@ class ChroLens_SothothApp(tb.Window):
         script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
         script_combo = tb.Combobox(frm_script, textvariable=script_var, values=script_files, width=20, state="readonly")
         script_combo.pack(side="left", fill="x", expand=True)
-        delay_script_var = tk.DoubleVar(value=act.delay)
-        tb.Entry(frm_script, textvariable=delay_script_var, width=8).pack(side="left", padx=(8, 0))
+        # 已移除延遲輸入框
 
         # 3. 錄製快捷鍵
         frm_record = tb.Frame(win)
@@ -419,13 +417,13 @@ class ChroLens_SothothApp(tb.Window):
             script_name = script_var.get().strip()
             if key_action:
                 act.action = key_action
-                act.delay = delay_key_var.get()
+                # act.delay 不變
             elif script_name:
                 act.action = f"[SCRIPT]{script_name}"
-                act.delay = delay_script_var.get()
+                # act.delay 不變
             else:
                 act.action = ""
-                act.delay = 0
+                # act.delay 不變
             win.destroy()
             self.update_tree()
             self.log(f"編輯動作：{act.action} 延遲{act.delay}秒")
