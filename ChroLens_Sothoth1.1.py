@@ -244,7 +244,12 @@ class ChroLens_SothothApp(tb.Window):
         self.actions.clear()
         self.tree.delete(*self.tree.get_children())
         for item in data:
-            act = Action(item["pic_key"], item["img_path"], item["action"], item["delay"])
+            act = Action(
+                item.get("pic_key", ""),
+                item.get("img_path", ""),
+                item.get("action", ""),
+                item.get("delay", 0)
+            )
             self.actions.append(act)
             self.tree.insert("", "end", values=(len(self.actions), act.pic_key, act.action, f"{act.delay:.1f}"))
         self.script_var.set(script_name)
@@ -307,7 +312,7 @@ class ChroLens_SothothApp(tb.Window):
     def edit_action(self, act, idx):
         win = tk.Toplevel(self)
         win.title("編輯動作/按鍵/Script")
-        win.geometry("500x500")
+        win.geometry("500x300")
         win.resizable(False, False)
 
         # 1. 按鍵（只捕捉一個動作）
@@ -483,6 +488,10 @@ class ChroLens_SothothApp(tb.Window):
                 speed = 100
         except Exception:
             speed = 100
+
+        # 只要重複時間有設定（非0），就以時間為主，忽略次數
+        if repeat_time > 0:
+            repeat = 0  # 0 代表無限循環，直到時間到
         self._stop_flag.clear()
         self.btn_run.config(state=tk.DISABLED)
         self.status_label.config(text="狀態：執行中", foreground="#DB0E59")
@@ -495,12 +504,12 @@ class ChroLens_SothothApp(tb.Window):
             args=(self.actions, on_finish, repeat, repeat_time, speed),
             daemon=True
         ).start()
-        self.log(f"開始執行動作（重複{repeat}次，重複時間{repeat_time}秒，速度{speed}）")
-
-    def stop_actions(self):
-        self._stop_flag.set()
-        self.status_label.config(text="狀態：已停止", foreground="#FF8800")
-        self.log("動作已手動停止")
+        if repeat_time > 0:
+            self.log(f"開始執行動作（重複時間{repeat_time}秒，速度{speed}）")
+        elif repeat == 0:
+            self.log(f"開始執行動作（無限循環，速度{speed}）")
+        else:
+            self.log(f"開始執行動作（重複{repeat}次，速度{speed}）")
 
     def perform_actions(self, actions, on_finish, repeat=1, repeat_time=0, speed=100):
         import pyautogui, time, keyboard, mouse, json, os
@@ -617,6 +626,7 @@ class ChroLens_SothothApp(tb.Window):
                         keyboard.press_and_release(act.action)
                     time.sleep(act.delay / speed_ratio)
             count += 1
+            # 只要有設定重複時間，時間到就結束
             if repeat_time > 0:
                 elapsed = time.time() - start_time
                 if elapsed >= repeat_time:
@@ -706,7 +716,7 @@ class ChroLens_SothothApp(tb.Window):
     def open_script_merge(self):
         win = tk.Toplevel(self)
         win.title("腳本合併工具")
-        win.geometry("600x400")
+        win.geometry("900x550")
         win.resizable(False, False)
 
         left_frame = tb.Frame(win)
@@ -714,7 +724,7 @@ class ChroLens_SothothApp(tb.Window):
         tb.Label(left_frame, text="所有腳本", style="My.TLabel").pack()
         script_files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
         script_names = [os.path.splitext(f)[0] for f in script_files]
-        listbox_all = tk.Listbox(left_frame, selectmode="extended", width=24)
+        listbox_all = tk.Listbox(left_frame, selectmode="extended", width=28)
         for name in script_names:
             listbox_all.insert(tk.END, name)
         listbox_all.pack(fill="y", expand=True)
@@ -725,20 +735,25 @@ class ChroLens_SothothApp(tb.Window):
         btn_add.pack(pady=10)
         btn_remove = tb.Button(btn_frame, text="← 移除")
         btn_remove.pack(pady=10)
-        # 新增紅色刪除按鈕
         btn_delete = tb.Button(btn_frame, text="刪除腳本", bootstyle="danger", width=10)
         btn_delete.pack(pady=20)
+        btn_merge = tb.Button(btn_frame, text="合併", bootstyle="success", width=10)
+        btn_merge.pack(pady=10)
 
         right_frame = tb.Frame(win)
         right_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
         tb.Label(right_frame, text="合併清單", style="My.TLabel").pack()
-        listbox_merge = tk.Listbox(right_frame, selectmode="extended", width=24)
+        listbox_merge = tk.Listbox(right_frame, selectmode="extended", width=28)
         listbox_merge.pack(fill="both", expand=True)
 
-        entry_name = tk.Entry(win, width=24)
-        entry_name.pack(side="left", padx=10)
-        btn_merge_save = tb.Button(win, text="合併並儲存", width=14)
-        btn_merge_save.pack(side="left", padx=10)
+        # 新增：合併命名區塊
+        frm_merge_bottom = tb.Frame(right_frame)
+        frm_merge_bottom.pack(fill="x", pady=(10, 0))
+        tb.Label(frm_merge_bottom, text="合併名稱").pack(side="left", padx=(0, 4))
+        entry_name = tb.Entry(frm_merge_bottom, width=18)
+        entry_name.pack(side="left", padx=(0, 8))
+        btn_merge_save = tb.Button(frm_merge_bottom, text="合併並儲存", width=12)
+        btn_merge_save.pack(side="left")
 
         merge_items = []
 
@@ -787,7 +802,10 @@ class ChroLens_SothothApp(tb.Window):
                 merge_items.pop(i)
             refresh_merge_list()
 
-        def on_merge_save():
+        def do_merge():
+            if not merge_items:
+                messagebox.showwarning("提示", "請先將要合併的腳本加入右側清單")
+                return
             new_name = entry_name.get().strip()
             if not new_name:
                 messagebox.showerror("錯誤", "請輸入新腳本名稱")
@@ -810,8 +828,9 @@ class ChroLens_SothothApp(tb.Window):
 
         btn_add.config(command=on_add)
         btn_remove.config(command=on_remove)
-        btn_merge_save.config(command=on_merge_save)
+        btn_merge_save.config(command=do_merge)
         btn_delete.config(command=on_delete)
+        btn_merge.config(command=do_merge)
         win.grab_set()
 
     def save_actions(self):
@@ -1041,6 +1060,13 @@ class ChroLens_SothothApp(tb.Window):
         except Exception as e:
             messagebox.showerror("錯誤", f"更名失敗: {e}")
         self.rename_var.set("")  # 更名後清空輸入框
+
+    def stop_actions(self):
+        """停止所有動作執行"""
+        self._stop_flag.set()
+        self.btn_run.config(state=tk.NORMAL)
+        self.status_label.config(text="狀態：已停止", foreground="#888888")
+        self.log("已手動停止動作")
 
 
 if __name__ == "__main__":
