@@ -22,10 +22,12 @@ import mouse
 import datetime
 import copy
 import ctypes
+import sys
 
-IMAGE_DIR = "images"
-SCRIPTS_DIR = "scripts"
-LAST_SESSION_FILE = "last_session.json"
+BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+IMAGE_DIR = os.path.join(BASE_DIR, "images")
+SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
+LAST_SESSION_FILE = os.path.join(BASE_DIR, "last_session.json")
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
 if not os.path.exists(SCRIPTS_DIR):
@@ -124,22 +126,9 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_add = tb.Button(frm_top, text="新增動作", width=16, bootstyle=PRIMARY, command=self.add_action)
         self.btn_add.grid(row=0, column=3, padx=4)
 
-        # ====== 腳本選單獨立 row ======
-        frm_script = tb.Frame(self, padding=(10, 0, 10, 5))
-        frm_script.pack(fill="x")
-        tb.Label(frm_script, text="腳本選單:", style="My.TLabel").pack(side="left")
-        self.script_var = tk.StringVar()
-        self.script_menu = tb.Combobox(frm_script, textvariable=self.script_var, width=24, state="readonly", style="My.TCombobox")
-        self.script_menu.pack(side="left", padx=4)
-        self.refresh_script_menu()
-        self.script_menu.bind("<<ComboboxSelected>>", self.on_script_select)
-
-        # 新增：修改腳本名稱輸入框與按鈕
-        self.rename_var = tk.StringVar()
-        self.rename_entry = tb.Entry(frm_script, textvariable=self.rename_var, width=20)
-        self.rename_entry.pack(side="left", padx=4)
-        self.btn_rename = tb.Button(frm_script, text="修改腳本名稱", command=self.rename_script, bootstyle=WARNING, width=12)
-        self.btn_rename.pack(side="left", padx=4)
+        # ====== 新增：快捷鍵設定按鈕（加在最右邊） ======
+        self.btn_hotkey = tb.Button(frm_top, text="快捷鍵", width=8, bootstyle=SECONDARY, command=self.open_hotkey_settings)
+        self.btn_hotkey.grid(row=0, column=10, padx=4, sticky="e")
 
         # ====== 主區塊：動作表格與日誌 ======
         frm_main = tb.Frame(self, padding=(10, 5, 10, 5))
@@ -258,7 +247,9 @@ class ChroLens_SothothApp(tb.Window):
     def update_tree(self):
         self.tree.delete(*self.tree.get_children())
         for idx, act in enumerate(self.actions, 1):
-            self.tree.insert("", "end", values=(idx, act.pic_key, act.action, f"{act.delay:.1f}"))
+            # 顯示時去除 [SCRIPT]
+            action_display = act.action.replace("[SCRIPT]", "") if act.action.startswith("[SCRIPT]") else act.action
+            self.tree.insert("", "end", values=(idx, act.pic_key, action_display, f"{act.delay:.1f}"))
 
     def log(self, msg):
         self.log_text.config(state="normal")
@@ -311,15 +302,22 @@ class ChroLens_SothothApp(tb.Window):
 
     def edit_action(self, act, idx):
         win = tk.Toplevel(self)
-        win.title("編輯動作/按鍵/Script")
-        win.geometry("500x300")
+        win.title("動作編輯視窗")
+        win.geometry("500x400")
         win.resizable(False, False)
 
         # 1. 按鍵（只捕捉一個動作）
         frm_key = tb.Frame(win)
         frm_key.pack(fill="x", padx=10, pady=(20, 0))
         tb.Label(frm_key, text="按鍵", width=6, anchor="w").pack(side="left")
-        key_var = tk.StringVar(value=act.action)
+        # === 修正：分流初始化 ===
+        if act.action.startswith("[SCRIPT]"):
+            key_init = ""
+            script_init = act.action.replace("[SCRIPT]", "")
+        else:
+            key_init = act.action
+            script_init = ""
+        key_var = tk.StringVar(value=key_init)
         key_entry = tb.Entry(frm_key, textvariable=key_var, width=20, font=("Microsoft JhengHei", 12), state="readonly")
         key_entry.pack(side="left", fill="x", expand=True)
         # 已移除延遲輸入框
@@ -388,29 +386,68 @@ class ChroLens_SothothApp(tb.Window):
         frm_script = tb.Frame(win)
         frm_script.pack(fill="x", padx=10, pady=(30, 0))
         tb.Label(frm_script, text="Script", width=6, anchor="w").pack(side="left")
-        script_var = tk.StringVar()
+        script_var = tk.StringVar(value=script_init)
         script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
         script_combo = tb.Combobox(frm_script, textvariable=script_var, values=script_files, width=20, state="readonly")
         script_combo.pack(side="left", fill="x", expand=True)
-        # 已移除延遲輸入框
+
+        # === 新增：腳本名稱修改框與按鈕 ===
+        frm_rename = tb.Frame(win)
+        frm_rename.pack(fill="x", padx=10, pady=(10, 0))
+        rename_var = tk.StringVar()
+        entry_rename = tb.Entry(frm_rename, textvariable=rename_var, width=20)
+        entry_rename.pack(side="left", padx=4)
+        def do_rename():
+            old_name = script_var.get()
+            new_name = rename_var.get().strip()
+            if not old_name or not new_name:
+                messagebox.showinfo("提示", "請選擇腳本並輸入新名稱。")
+                return
+            if not new_name.endswith('.json'):
+                new_name += '.json'
+            old_path = os.path.join(SCRIPTS_DIR, old_name + ".json") if not old_name.endswith('.json') else os.path.join(SCRIPTS_DIR, old_name)
+            new_path = os.path.join(SCRIPTS_DIR, new_name)
+            if os.path.exists(new_path):
+                messagebox.showerror("錯誤", "檔案已存在，請換個名稱。")
+                return
+            try:
+                os.rename(old_path, new_path)
+                self.log(f"腳本已更名為：{new_name}")
+                # 重新整理下拉選單
+                script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
+                script_combo["values"] = script_files
+                script_var.set(os.path.splitext(new_name)[0])
+            except Exception as e:
+                messagebox.showerror("錯誤", f"更名失敗: {e}")
+            rename_var.set("")  # 更名後清空輸入框
+        btn_rename = tb.Button(frm_rename, text="修改腳本名稱", command=do_rename, bootstyle=WARNING, width=12)
+        btn_rename.pack(side="left", padx=4)
 
         # 3. 錄製快捷鍵
         frm_record = tb.Frame(win)
         frm_record.pack(fill="x", padx=10, pady=(30, 0))
         import keyboard
 
+        config_path = "hotkey_config.json"
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                hotkey_config = json.load(f)
+        else:
+            hotkey_config = {"record": "F10", "stop_record": "F9"}
+
+        record_hotkey_str = hotkey_config.get("record", "F10")
+        stop_hotkey_str = hotkey_config.get("stop_record", "F9")
+
         def trigger_record():
             self.start_record_script(script_var)
         def trigger_stop_record():
             self.stop_record_script()
 
-        # 註冊快捷鍵（只在本視窗存活時）
-        record_hotkey = keyboard.add_hotkey('f10', trigger_record, suppress=False)
-        stop_hotkey = keyboard.add_hotkey('f9', trigger_stop_record, suppress=False)
+        record_hotkey = keyboard.add_hotkey(record_hotkey_str, trigger_record, suppress=False)
+        stop_hotkey = keyboard.add_hotkey(stop_hotkey_str, trigger_stop_record, suppress=False)
 
-        tb.Button(frm_record, text="錄製(F10)", width=14, bootstyle=PRIMARY, command=trigger_record).pack(side="left", padx=(0, 8))
-        tb.Button(frm_record, text="停止錄製(F9)", width=14, bootstyle=WARNING, command=trigger_stop_record).pack(side="left")
-
+        tb.Button(frm_record, text=f"錄製({record_hotkey_str})", width=14, bootstyle=PRIMARY, command=trigger_record).pack(side="left", padx=(0, 8))
+        tb.Button(frm_record, text=f"停止錄製({stop_hotkey_str})", width=14, bootstyle=WARNING, command=trigger_stop_record).pack(side="left")
         def on_ok():
             # 只會擇一
             key_action = key_var.get().strip()
@@ -639,21 +676,24 @@ class ChroLens_SothothApp(tb.Window):
     def open_hotkey_settings(self):
         win = tk.Toplevel(self)
         win.title("快捷鍵設定")
-        win.geometry("340x580")
+        win.geometry("340x300")
         win.resizable(False, False)
 
-        # 功能與預設快捷鍵
+        # 你可以根據實際支援的功能調整 labels
         labels = {
-            "run": "執行",
-            "stop": "停止",
-            "add": "新增動作",
-            "script": "Script",
-            "gallery": "圖庫",
-            "record": "錄製",
-            "record_stop": "錄製停止"
+            "run": "執行(F6)",
+            "stop": "停止(F7)",
+            "record": "錄製(F10)",
+            "stop_record": "停止錄製F9"
+        }
+        default_hotkeys = {
+            "run": "F6",
+            "stop": "F7",
+            "record": "F10",
+            "stop_record": "F9"
         }
         # 讀取現有設定
-        config_path = "config.json"
+        config_path = "hotkey_config.json"
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
@@ -663,7 +703,6 @@ class ChroLens_SothothApp(tb.Window):
         row = 0
 
         def on_entry_key(event, key, var):
-            # 只記錄實際按下的組合鍵或單鍵
             keys = []
             if event.state & 0x0001: keys.append("shift")
             if event.state & 0x0004: keys.append("ctrl")
@@ -687,24 +726,27 @@ class ChroLens_SothothApp(tb.Window):
             entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="normal")
             entry.grid(row=row, column=1, padx=10)
             vars[key] = var
-            # 綁定事件
             entry.bind("<KeyRelease>", lambda e, k=key, v=var: on_entry_key(e, k, v))
             entry.bind("<FocusIn>", lambda e, v=var: on_entry_focus_in(e, v))
             entry.bind("<FocusOut>", lambda e, k=key, v=var: on_entry_focus_out(e, k, v))
             row += 1
 
         def save_and_apply():
+            # 先移除舊的錄製快捷鍵
+            try:
+                keyboard.remove_hotkey(hotkey_config.get("record", "F10"))
+            except Exception:
+                pass
+            try:
+                keyboard.remove_hotkey(hotkey_config.get("stop_record", "F9"))
+            except Exception:
+                pass
             for key in default_hotkeys:
                 val = vars[key].get()
                 if val and val != "請輸入按鍵":
-                    config[key] = val.lower()
+                    config[key] = val.upper()
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
-            # 更新到 self.hotkey_config
-            self.hotkey_config = config
-            self.register_hotkeys()
-            # 更新主畫面按鈕顯示
-            self.update_hotkey_labels()
             messagebox.showinfo("完成", "快捷鍵設定已儲存")
             win.destroy()
 
