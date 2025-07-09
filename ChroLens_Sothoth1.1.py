@@ -25,9 +25,6 @@ import ctypes
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
-IMAGE_DIR = os.path.join(BASE_DIR, "images")
-SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
-LAST_SESSION_FILE = os.path.join(BASE_DIR, "last_session.json")
 HOTKEY_CONFIG_PATH = os.path.join(BASE_DIR, "hotkey_config.json")
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
@@ -825,7 +822,7 @@ class ChroLens_SothothApp(tb.Window):
                 val = vars[key].get()
                 if val and val != "請輸入按鍵":
                     config[key] = val.upper()
-            with open(config_path, "w", encoding="utf-8") as f:
+            with open(HOTKEY_CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
             messagebox.showinfo("完成", "快捷鍵設定已儲存")
             win.destroy()
