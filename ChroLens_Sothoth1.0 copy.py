@@ -28,6 +28,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 IMAGE_DIR = os.path.join(BASE_DIR, "images")
 SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
 LAST_SESSION_FILE = os.path.join(BASE_DIR, "last_session.json")
+HOTKEY_CONFIG_PATH = os.path.join(BASE_DIR, "hotkey_config.json")
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
 if not os.path.exists(SCRIPTS_DIR):
@@ -125,6 +126,10 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_save.grid(row=0, column=2, padx=4)
         self.btn_add = tb.Button(frm_top, text="新增動作", width=16, bootstyle=PRIMARY, command=self.add_action)
         self.btn_add.grid(row=0, column=3, padx=4)
+
+        # ====== 新增：快捷鍵設定按鈕（加在最右邊） ======
+        self.btn_hotkey = tb.Button(frm_top, text="快捷鍵", width=8, bootstyle=SECONDARY, command=self.open_hotkey_settings)
+        self.btn_hotkey.grid(row=0, column=10, padx=4, sticky="e")
 
         # ====== 主區塊：動作表格與日誌 ======
         frm_main = tb.Frame(self, padding=(10, 5, 10, 5))
@@ -424,18 +429,35 @@ class ChroLens_SothothApp(tb.Window):
         frm_record.pack(fill="x", padx=10, pady=(30, 0))
         import keyboard
 
+        config_path = "hotkey_config.json"
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                hotkey_config = json.load(f)
+        else:
+            hotkey_config = {"record": "F10", "stop_record": "F9"}
+
+        record_hotkey_str = hotkey_config.get("record", "F10")
+        stop_hotkey_str = hotkey_config.get("stop_record", "F9")
+
         def trigger_record():
             self.start_record_script(script_var)
         def trigger_stop_record():
             self.stop_record_script()
 
         # 註冊快捷鍵（只在本視窗存活時）
-        record_hotkey = keyboard.add_hotkey('f10', trigger_record, suppress=False)
-        stop_hotkey = keyboard.add_hotkey('f9', trigger_stop_record, suppress=False)
+        try:
+            record_hotkey = keyboard.add_hotkey(record_hotkey_str, trigger_record, suppress=False)
+        except Exception as e:
+            messagebox.showerror("快捷鍵錯誤", f"錄製快捷鍵設定錯誤: {record_hotkey_str}\n{e}")
+            record_hotkey = None
+        try:
+            stop_hotkey = keyboard.add_hotkey(stop_hotkey_str, trigger_stop_record, suppress=False)
+        except Exception as e:
+            messagebox.showerror("快捷鍵錯誤", f"停止錄製快捷鍵設定錯誤: {stop_hotkey_str}\n{e}")
+            stop_hotkey = None
 
-        tb.Button(frm_record, text="錄製(F10)", width=14, bootstyle=PRIMARY, command=trigger_record).pack(side="left", padx=(0, 8))
-        tb.Button(frm_record, text="停止錄製(F9)", width=14, bootstyle=WARNING, command=trigger_stop_record).pack(side="left")
-
+        tb.Button(frm_record, text=f"錄製({record_hotkey_str})", width=14, bootstyle=PRIMARY, command=trigger_record).pack(side="left", padx=(0, 8))
+        tb.Button(frm_record, text=f"停止錄製({stop_hotkey_str})", width=14, bootstyle=WARNING, command=trigger_stop_record).pack(side="left")
         def on_ok():
             # 只會擇一
             key_action = key_var.get().strip()
@@ -664,21 +686,24 @@ class ChroLens_SothothApp(tb.Window):
     def open_hotkey_settings(self):
         win = tk.Toplevel(self)
         win.title("快捷鍵設定")
-        win.geometry("340x580")
+        win.geometry("340x300")
         win.resizable(False, False)
 
-        # 功能與預設快捷鍵
+        # 你可以根據實際支援的功能調整 labels
         labels = {
-            "run": "執行",
-            "stop": "停止",
-            "add": "新增動作",
-            "script": "Script",
-            "gallery": "圖庫",
-            "record": "錄製",
-            "record_stop": "錄製停止"
+            "run": "執行(F6)",
+            "stop": "停止(F7)",
+            "record": "錄製(F10)",
+            "stop_record": "停止錄製F9"
+        }
+        default_hotkeys = {
+            "run": "F6",
+            "stop": "F7",
+            "record": "F10",
+            "stop_record": "F9"
         }
         # 讀取現有設定
-        config_path = "config.json"
+        config_path = "hotkey_config.json"
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
@@ -688,7 +713,6 @@ class ChroLens_SothothApp(tb.Window):
         row = 0
 
         def on_entry_key(event, key, var):
-            # 只記錄實際按下的組合鍵或單鍵
             keys = []
             if event.state & 0x0001: keys.append("shift")
             if event.state & 0x0004: keys.append("ctrl")
@@ -712,24 +736,27 @@ class ChroLens_SothothApp(tb.Window):
             entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="normal")
             entry.grid(row=row, column=1, padx=10)
             vars[key] = var
-            # 綁定事件
             entry.bind("<KeyRelease>", lambda e, k=key, v=var: on_entry_key(e, k, v))
             entry.bind("<FocusIn>", lambda e, v=var: on_entry_focus_in(e, v))
             entry.bind("<FocusOut>", lambda e, k=key, v=var: on_entry_focus_out(e, k, v))
             row += 1
 
         def save_and_apply():
+            # 先移除舊的錄製快捷鍵
+            try:
+                keyboard.remove_hotkey(hotkey_config.get("record", "F10"))
+            except Exception:
+                pass
+            try:
+                keyboard.remove_hotkey(hotkey_config.get("stop_record", "F9"))
+            except Exception:
+                pass
             for key in default_hotkeys:
                 val = vars[key].get()
                 if val and val != "請輸入按鍵":
-                    config[key] = val.lower()
+                    config[key] = val.upper()
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
-            # 更新到 self.hotkey_config
-            self.hotkey_config = config
-            self.register_hotkeys()
-            # 更新主畫面按鈕顯示
-            self.update_hotkey_labels()
             messagebox.showinfo("完成", "快捷鍵設定已儲存")
             win.destroy()
 
@@ -1090,6 +1117,11 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_run.config(state=tk.NORMAL)
         self.status_label.config(text="狀態：已停止", foreground="#888888")
         self.log("已手動停止動作")
+
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # 讓程式支援高DPI
+except Exception:
+    pass
 
 
 if __name__ == "__main__":
