@@ -25,7 +25,10 @@ import ctypes
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+IMAGE_DIR = os.path.join(BASE_DIR, "images")
+SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
 HOTKEY_CONFIG_PATH = os.path.join(BASE_DIR, "hotkey_config.json")
+LAST_SESSION_FILE = os.path.join(BASE_DIR, "last_session.json")
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
 if not os.path.exists(SCRIPTS_DIR):
