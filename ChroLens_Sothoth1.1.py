@@ -2,7 +2,7 @@
 # row1: 腳本選單（腳本下拉選單、修改腳本名稱輸入框、修改按鈕）
 # row2: 主區塊（動作表格/Treeview、日誌顯示區）
 # row3: 下方執行區（重複次數、重複時間、回放速度、執行/停止按鈕、狀態顯示）
-
+# pyinstaller --onedir --noconsole ChroLens_Sothoth1.1.py
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
@@ -24,7 +24,11 @@ import copy
 import ctypes
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 IMAGE_DIR = os.path.join(BASE_DIR, "images")
 SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
 HOTKEY_CONFIG_PATH = os.path.join(BASE_DIR, "hotkey_config.json")
