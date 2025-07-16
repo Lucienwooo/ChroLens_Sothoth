@@ -45,11 +45,12 @@ class Action:
         self.loop_detect = loop_detect
 
 def locate_image_on_screen(template_path, confidence=0.8):
+    import imutils
     screenshot = pyautogui.screenshot()
-    screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
+    screenshot_rgb = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
     try:
         file_bytes = np.fromfile(template_path, dtype=np.uint8)
-        template = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+        template = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     except Exception as e:
         from tkinter import messagebox
         messagebox.showerror("錯誤", f"無法讀取圖片: {template_path}\n{e}")
@@ -58,12 +59,44 @@ def locate_image_on_screen(template_path, confidence=0.8):
         from tkinter import messagebox
         messagebox.showerror("錯誤", f"無法讀取圖片: {template_path}")
         return None
-    res = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+
+    # 1. 彩色比對
+    res = cv2.matchTemplate(screenshot_rgb, template, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
     if max_val >= confidence:
         h, w = template.shape[:2]
         center = (max_loc[0] + w // 2, max_loc[1] + h // 2)
         return center
+
+    # 2. 多尺度比對
+    for scale in np.linspace(0.7, 1.3, 13)[::-1]:
+        resized = imutils.resize(template, width=int(template.shape[1] * scale))
+        if resized.shape[0] > screenshot_rgb.shape[0] or resized.shape[1] > screenshot_rgb.shape[1]:
+            continue
+        res = cv2.matchTemplate(screenshot_rgb, resized, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+        if max_val >= confidence:
+            h, w = resized.shape[:2]
+            center = (max_loc[0] + w // 2, max_loc[1] + h // 2)
+            return center
+
+    # 3. ORB 特徵點比對
+    try:
+        orb = cv2.ORB_create()
+        kp1, des1 = orb.detectAndCompute(template, None)
+        kp2, des2 = orb.detectAndCompute(screenshot_rgb, None)
+        if des1 is not None and des2 is not None:
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+            matches = bf.match(des1, des2)
+            matches = sorted(matches, key=lambda x: x.distance)
+            if len(matches) > 10:
+                pts = [kp2[m.trainIdx].pt for m in matches[:10]]
+                x = int(np.mean([p[0] for p in pts]))
+                y = int(np.mean([p[1] for p in pts]))
+                return (x, y)
+    except Exception:
+        pass
+
     return None
 
 def move_mouse_abs(x, y):
