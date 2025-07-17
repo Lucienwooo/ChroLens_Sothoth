@@ -2,7 +2,7 @@
 # row1: 腳本選單（腳本下拉選單、修改腳本名稱輸入框、修改按鈕）
 # row2: 主區塊（動作表格/Treeview、日誌顯示區）
 # row3: 下方執行區（重複次數、重複時間、回放速度、執行/停止按鈕、狀態顯示）
-
+# pyinstaller --onedir --noconsole ChroLens_Sothoth1.1.py
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
@@ -24,29 +24,37 @@ import copy
 import ctypes
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 IMAGE_DIR = os.path.join(BASE_DIR, "images")
 SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
-LAST_SESSION_FILE = os.path.join(BASE_DIR, "last_session.json")
 HOTKEY_CONFIG_PATH = os.path.join(BASE_DIR, "hotkey_config.json")
+LAST_SESSION_FILE = os.path.join(BASE_DIR, "last_session.json")
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
 if not os.path.exists(SCRIPTS_DIR):
     os.makedirs(SCRIPTS_DIR)
 
 class Action:
-    def __init__(self, pic_key, img_path, action, delay=1.1):
+    def __init__(self, pic_key, img_path, action, delay=1.1, detect_wait=0, stop_on_fail=False, loop_detect=False):
         self.pic_key = pic_key
         self.img_path = img_path
         self.action = action
         self.delay = delay
+        self.detect_wait = detect_wait
+        self.stop_on_fail = stop_on_fail
+        self.loop_detect = loop_detect
 
 def locate_image_on_screen(template_path, confidence=0.8):
+    import imutils
     screenshot = pyautogui.screenshot()
-    screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
+    screenshot_rgb = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
     try:
         file_bytes = np.fromfile(template_path, dtype=np.uint8)
-        template = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+        template = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     except Exception as e:
         from tkinter import messagebox
         messagebox.showerror("錯誤", f"無法讀取圖片: {template_path}\n{e}")
@@ -55,12 +63,44 @@ def locate_image_on_screen(template_path, confidence=0.8):
         from tkinter import messagebox
         messagebox.showerror("錯誤", f"無法讀取圖片: {template_path}")
         return None
-    res = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+
+    # 1. 彩色比對
+    res = cv2.matchTemplate(screenshot_rgb, template, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
     if max_val >= confidence:
         h, w = template.shape[:2]
         center = (max_loc[0] + w // 2, max_loc[1] + h // 2)
         return center
+
+    # 2. 多尺度比對
+    for scale in np.linspace(0.7, 1.3, 13)[::-1]:
+        resized = imutils.resize(template, width=int(template.shape[1] * scale))
+        if resized.shape[0] > screenshot_rgb.shape[0] or resized.shape[1] > screenshot_rgb.shape[1]:
+            continue
+        res = cv2.matchTemplate(screenshot_rgb, resized, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+        if max_val >= confidence:
+            h, w = resized.shape[:2]
+            center = (max_loc[0] + w // 2, max_loc[1] + h // 2)
+            return center
+
+    # 3. ORB 特徵點比對
+    try:
+        orb = cv2.ORB_create()
+        kp1, des1 = orb.detectAndCompute(template, None)
+        kp2, des2 = orb.detectAndCompute(screenshot_rgb, None)
+        if des1 is not None and des2 is not None:
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+            matches = bf.match(des1, des2)
+            matches = sorted(matches, key=lambda x: x.distance)
+            if len(matches) > 10:
+                pts = [kp2[m.trainIdx].pt for m in matches[:10]]
+                x = int(np.mean([p[0] for p in pts]))
+                y = int(np.mean([p[1] for p in pts]))
+                return (x, y)
+    except Exception:
+        pass
+
     return None
 
 def move_mouse_abs(x, y):
@@ -238,7 +278,10 @@ class ChroLens_SothothApp(tb.Window):
                 item.get("pic_key", ""),
                 item.get("img_path", ""),
                 item.get("action", ""),
-                item.get("delay", 0)
+                item.get("delay", 0),
+                item.get("detect_wait", 0),
+                item.get("stop_on_fail", False),
+                item.get("loop_detect", False)
             )
             self.actions.append(act)
             self.tree.insert("", "end", values=(len(self.actions), act.pic_key, act.action, f"{act.delay:.1f}"))
@@ -492,11 +535,62 @@ class ChroLens_SothothApp(tb.Window):
         win.grab_set()
 
     def edit_delay_tree(self, act, idx):
-        new_delay = simpledialog.askfloat("編輯延遲", "請輸入新的延遲秒數", minvalue=0, initialvalue=act.delay)
-        if new_delay is not None:
-            act.delay = new_delay
+        win = tk.Toplevel(self)
+        win.title("延遲設定")
+        win.geometry("340x300")  # 高度+50
+        win.resizable(False, False)
+
+        # 動作區塊
+        frm_action = tb.Frame(win)
+        frm_action.pack(fill="x", pady=(18, 0))
+        tb.Label(frm_action, text="動作：延遲秒數", font=("Microsoft JhengHei", 12)).pack(side="left", padx=(8, 4))
+        delay_var = tk.StringVar(value=str(int(act.delay) if act.delay == int(act.delay) else act.delay))
+        entry_delay = tk.Entry(frm_action, textvariable=delay_var, width=10, font=("Microsoft JhengHei", 12))
+        entry_delay.pack(side="left", fill="x")
+
+        # 分隔線
+        tb.Separator(win, orient="horizontal").pack(fill="x", pady=10)
+
+        # 圖片偵測區塊
+        frm_img = tb.Frame(win)
+        frm_img.pack(fill="x")
+        tb.Label(frm_img, text="圖片：偵測秒數", font=("Microsoft JhengHei", 12)).pack(side="left", padx=(8, 4))
+        detect_wait_var = tk.StringVar(value=str(int(getattr(act, "detect_wait", 0)) if getattr(act, "detect_wait", 0) == int(getattr(act, "detect_wait", 0)) else getattr(act, "detect_wait", 0)))
+        entry_detect = tk.Entry(frm_img, textvariable=detect_wait_var, width=10, font=("Microsoft JhengHei", 12))
+        entry_detect.pack(side="left", fill="x")
+
+        # 勾選框：偵測失敗自動繼續
+        stop_on_fail_var = tk.BooleanVar(value=getattr(act, "stop_on_fail", False))
+        chk1 = tk.Checkbutton(win, text="偵測失敗自動繼續", variable=stop_on_fail_var, font=("Microsoft JhengHei", 12))
+        chk1.pack(anchor="w", padx=30, pady=(10, 0))
+
+        # 勾選框：循環偵測
+        loop_detect_var = tk.BooleanVar(value=getattr(act, "loop_detect", False))
+        chk2 = tk.Checkbutton(win, text="循環偵測", variable=loop_detect_var, font=("Microsoft JhengHei", 12))
+        chk2.pack(anchor="w", padx=30, pady=(2, 0))
+
+        def on_ok():
+            # 延遲秒數
+            try:
+                delay = float(delay_var.get())
+                act.delay = delay
+            except Exception:
+                act.delay = 0
+            # 偵測等待秒數
+            try:
+                detect_wait = float(detect_wait_var.get())
+                act.detect_wait = detect_wait
+            except Exception:
+                act.detect_wait = 0
+            act.stop_on_fail = stop_on_fail_var.get()
+            act.loop_detect = loop_detect_var.get()
             self.update_tree()
             self.log(f"編輯延遲：{act.pic_key} - {act.action} - {act.delay}秒")
+            win.destroy()
+
+        btn = tb.Button(win, text="確定", bootstyle=SUCCESS, width=10, command=on_ok)
+        btn.pack(pady=18)
+        win.grab_set()
 
     def add_action_direct(self):
         pass
@@ -651,16 +745,29 @@ class ChroLens_SothothApp(tb.Window):
                         # --- 新增：如果有圖片，先找圖片並移動 ---
                         if act.img_path and os.path.exists(act.img_path):
                             found = False
-                            for _ in range(10):
+                            detect_wait = getattr(act, "detect_wait", 0)
+                            stop_on_fail = getattr(act, "stop_on_fail", False)
+                            loop_detect = getattr(act, "loop_detect", False)
+                            start_time = time.time()
+                            while True:
                                 pos = locate_image_on_screen(act.img_path)
                                 if pos:
                                     found = True
                                     break
+                                if detect_wait > 0 and (time.time() - start_time) >= detect_wait:
+                                    break
+                                if not loop_detect:
+                                    time.sleep(0.5 / speed_ratio)
+                                    break
                                 time.sleep(0.5 / speed_ratio)
                             if not found:
-                                messagebox.showwarning("警告", f"找不到圖片: {os.path.basename(act.img_path)}")
-                                on_finish()
-                                return
+                                if stop_on_fail:
+                                    messagebox.showwarning("警告", f"找不到圖片: {os.path.basename(act.img_path)}，已停止所有動作")
+                                    on_finish()
+                                    return
+                                else:
+                                    self.log(f"找不到圖片: {os.path.basename(act.img_path)}，略過此動作")
+                                    continue
                             pyautogui.moveTo(pos)
                         # --- 再執行點擊 ---
                         if act.action == "左鍵點擊":
@@ -755,7 +862,7 @@ class ChroLens_SothothApp(tb.Window):
                 val = vars[key].get()
                 if val and val != "請輸入按鍵":
                     config[key] = val.upper()
-            with open(config_path, "w", encoding="utf-8") as f:
+            with open(HOTKEY_CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
             messagebox.showinfo("完成", "快捷鍵設定已儲存")
             win.destroy()
@@ -899,7 +1006,10 @@ class ChroLens_SothothApp(tb.Window):
                 "pic_key": act.pic_key,
                 "img_path": act.img_path,
                 "action": act.action,
-                "delay": act.delay
+                "delay": act.delay,
+                "detect_wait": getattr(act, "detect_wait", 0),
+                "stop_on_fail": getattr(act, "stop_on_fail", False),
+                "loop_detect": getattr(act, "loop_detect", False)
             }
             for act in self.actions
         ]
