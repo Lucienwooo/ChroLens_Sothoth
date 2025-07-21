@@ -23,7 +23,6 @@ import datetime
 import copy
 import ctypes
 import sys
-import pywinauto
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -328,10 +327,7 @@ class ChroLens_SothothApp(tb.Window):
             self.edit_delay_tree(act, idx)
 
     def edit_pic(self, act, idx):
-        img_path = filedialog.askopenfilename(
-            title="選擇圖片",
-            filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")]
-        )
+        img_path = filedialog.askopenfilename(title="選擇圖片", filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")])
         if not img_path:
             return
         pic_num = idx + 1
@@ -341,12 +337,8 @@ class ChroLens_SothothApp(tb.Window):
         pic_key = f"pic{pic_num}_{name8}"
         save_name = f"{pic_key}{ext}"
         save_path = os.path.join(IMAGE_DIR, save_name)
-        # 無論是否存在都覆蓋
-        try:
+        if not os.path.exists(save_path):
             shutil.copy(img_path, save_path)
-        except Exception as e:
-            messagebox.showerror("錯誤", f"圖片複製失敗: {e}")
-            return
         act.pic_key = pic_key
         act.img_path = save_path
         self.update_tree()
@@ -758,12 +750,7 @@ class ChroLens_SothothApp(tb.Window):
                             loop_detect = getattr(act, "loop_detect", False)
                             start_time = time.time()
                             while True:
-                                # 新增：優先用 UI Automation
-                                pos = self.locate_element_or_image(
-                                    act.img_path,
-                                    confidence=0.8,
-                                    search_text=act.pic_key  # 假設 pic_key 是 UI 元件名稱
-                                )
+                                pos = locate_image_on_screen(act.img_path)
                                 if pos:
                                     found = True
                                     break
@@ -1240,50 +1227,6 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_run.config(state=tk.NORMAL)
         self.status_label.config(text="狀態：已停止", foreground="#888888")
         self.log("已手動停止動作")
-
-    def locate_element_or_image(self, template_path, confidence=0.8, search_text=None, app_title=None):
-        # 1. UI Automation
-        if search_text and not search_text.startswith("pic"):
-            try:
-                app = pywinauto.Application(backend="uia").connect(title=app_title) if app_title else pywinauto.Application(backend="uia").connect(path=sys.executable)
-                dlg = app.top_window()
-                ctrl = dlg.child_window(title=search_text)
-                rect = ctrl.rectangle()
-                center = ((rect.left + rect.right)//2, (rect.top + rect.bottom)//2)
-                return center
-            except Exception:
-                pass
-        # 2. SIFT 特徵點
-        try:
-            pos = locate_image_with_sift(template_path, confidence)
-            if pos:
-                return pos
-        except Exception:
-            pass
-        # 3. 原本的圖片比對
-        return locate_image_on_screen(template_path, confidence)
-
-def locate_image_with_sift(template_path, confidence=0.8):
-    import cv2
-    screenshot = pyautogui.screenshot()
-    screenshot_rgb = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
-    file_bytes = np.fromfile(template_path, dtype=np.uint8)
-    template = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    sift = cv2.SIFT_create()
-    kp1, des1 = sift.detectAndCompute(template, None)
-    kp2, des2 = sift.detectAndCompute(screenshot_rgb, None)
-    bf = cv2.BFMatcher()
-    matches = bf.knnMatch(des1, des2, k=2)
-    good = []
-    for m, n in matches:
-        if m.distance < 0.75 * n.distance:
-            good.append(m)
-    if len(good) > 8:
-        pts = [kp2[m.trainIdx].pt for m in good]
-        x = int(np.mean([p[0] for p in pts]))
-        y = int(np.mean([p[1] for p in pts]))
-        return (x, y)
-    return None
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)  # 讓程式支援高DPI
