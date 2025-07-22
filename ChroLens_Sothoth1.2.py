@@ -389,8 +389,8 @@ class ChroLens_SothothApp(tb.Window):
 
         # 1. 按鍵（只捕捉一個動作）
         frm_key = tb.Frame(win)
-        frm_key.pack(fill="x", padx=10, pady=(20, 0))
-        tb.Label(frm_key, text="按鍵", width=6, anchor="w").pack(side="left")
+        frm_key.pack(fill="x", padx=10, pady=(20, 0), anchor="w")  # 靠左
+        tb.Label(frm_key, text="按鍵", width=6, anchor="w").pack(side="left", anchor="w")
         # === 修正：分流初始化 ===
         if act.action.startswith("[SCRIPT]"):
             key_init = ""
@@ -400,7 +400,7 @@ class ChroLens_SothothApp(tb.Window):
             script_init = ""
         key_var = tk.StringVar(value=key_init)
         key_entry = tb.Entry(frm_key, textvariable=key_var, width=20, font=("Microsoft JhengHei", 12), state="readonly")
-        key_entry.pack(side="left", fill="x", expand=True)
+        key_entry.pack(side="left", fill="x", expand=True, anchor="w")
         # 已移除延遲輸入框
 
         import keyboard as kb
@@ -465,20 +465,20 @@ class ChroLens_SothothApp(tb.Window):
 
         # 2. Script
         frm_script = tb.Frame(win)
-        frm_script.pack(fill="x", padx=10, pady=(30, 0))
-        tb.Label(frm_script, text="Script", width=6, anchor="w").pack(side="left")
+        frm_script.pack(fill="x", padx=10, pady=(30, 0), anchor="w")  # 靠左
+        tb.Label(frm_script, text="Script", width=6, anchor="w").pack(side="left", anchor="w")
         script_var = tk.StringVar(value=script_init)
         script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR)
                         if f.endswith(".json") and f.startswith("script_")]
         script_combo = tb.Combobox(frm_script, textvariable=script_var, values=script_files, width=20, state="readonly")
-        script_combo.pack(side="left", fill="x", expand=True)
+        script_combo.pack(side="left", fill="x", expand=True, anchor="w")
 
         # === 新增：腳本名稱修改框與按鈕 ===
         frm_rename = tb.Frame(win)
-        frm_rename.pack(fill="x", padx=10, pady=(10, 0))
+        frm_rename.pack(fill="x", padx=10, pady=(10, 0), anchor="w")  # 靠左
         rename_var = tk.StringVar()
         entry_rename = tb.Entry(frm_rename, textvariable=rename_var, width=20)
-        entry_rename.pack(side="left", padx=4)
+        entry_rename.pack(side="left", padx=4, anchor="w")
         def do_rename():
             old_name = script_var.get()
             new_name = rename_var.get().strip()
@@ -503,11 +503,11 @@ class ChroLens_SothothApp(tb.Window):
                 messagebox.showerror("錯誤", f"更名失敗: {e}")
             rename_var.set("")  # 更名後清空輸入框
         btn_rename = tb.Button(frm_rename, text="修改腳本名稱", command=do_rename, bootstyle=WARNING, width=12)
-        btn_rename.pack(side="left", padx=4)
+        btn_rename.pack(side="left", padx=4, anchor="w")
 
         # 3. 錄製快捷鍵
         frm_record = tb.Frame(win)
-        frm_record.pack(fill="x", padx=10, pady=(30, 0))
+        frm_record.pack(fill="x", padx=10, pady=(30, 0), anchor="w")  # 靠左
         import keyboard
 
         config_path = "hotkey_config.json"
@@ -525,30 +525,35 @@ class ChroLens_SothothApp(tb.Window):
         def trigger_stop_record():
             self.stop_record_script()
 
+        # === 恢復錄製與停止錄製按鈕 ===
+        btn_record = tb.Button(frm_record, text=f"錄製({record_hotkey_str})", width=12, bootstyle=SUCCESS, command=trigger_record)
+        btn_record.pack(side="left", padx=4, anchor="w")
+        btn_stop_record = tb.Button(frm_record, text=f"停止錄製({stop_hotkey_str})", width=12, bootstyle=WARNING, command=trigger_stop_record)
+        btn_stop_record.pack(side="left", padx=4, anchor="w")
+
         # 註冊全域快捷鍵（只要視窗存在就有效）
+        record_hotkey = None
+        stop_hotkey = None
         try:
             record_hotkey = keyboard.add_hotkey(record_hotkey_str, trigger_record, suppress=False)
         except Exception as e:
             messagebox.showerror("快捷鍵錯誤", f"錄製快捷鍵設定錯誤: {record_hotkey_str}\n{e}")
-            record_hotkey = None
         try:
             stop_hotkey = keyboard.add_hotkey(stop_hotkey_str, trigger_stop_record, suppress=False)
         except Exception as e:
             messagebox.showerror("快捷鍵錯誤", f"停止錄製快捷鍵設定錯誤: {stop_hotkey_str}\n{e}")
-            stop_hotkey = None
-
-        tb.Button(frm_record, text=f"錄製({record_hotkey_str})", width=14, bootstyle=PRIMARY, command=trigger_record).pack(side="left", padx=(0, 8))
-        tb.Button(frm_record, text=f"停止錄製({stop_hotkey_str})", width=14, bootstyle=WARNING, command=trigger_stop_record).pack(side="left")
 
         def on_close():
-            try:
-                keyboard.remove_hotkey(record_hotkey)
-            except Exception:
-                pass
-            try:
-                keyboard.remove_hotkey(stop_hotkey)
-            except Exception:
-                pass
+            if record_hotkey is not None:
+                try:
+                    keyboard.remove_hotkey(record_hotkey)
+                except Exception:
+                    pass
+            if stop_hotkey is not None:
+                try:
+                    keyboard.remove_hotkey(stop_hotkey)
+                except Exception:
+                    pass
             win.destroy()
 
         win.protocol("WM_DELETE_WINDOW", on_close)
@@ -571,7 +576,8 @@ class ChroLens_SothothApp(tb.Window):
             self.update_tree()
             self.log(f"編輯動作：{act.action} 延遲{act.delay}秒")
 
-        tb.Button(win, text="確定", bootstyle=SUCCESS, width=12, command=on_ok).pack(pady=30)
+        # === 確定按鈕置中 ===
+        tb.Button(win, text="確定", bootstyle=SUCCESS, width=12, command=on_ok).pack(pady=30, anchor="center")
 
     def edit_delay_tree(self, act, idx):
         win = tk.Toplevel(self)
