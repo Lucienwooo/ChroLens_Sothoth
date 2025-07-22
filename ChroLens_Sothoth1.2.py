@@ -172,6 +172,26 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_hotkey = tb.Button(frm_top, text="快捷鍵", width=8, bootstyle=SECONDARY, command=self.open_hotkey_settings)
         self.btn_hotkey.grid(row=0, column=10, padx=4, sticky="e")
 
+        # ====== row1: 方案選單區 ======
+        frm_scheme = tb.Frame(self, padding=(10, 0, 10, 5))
+        frm_scheme.pack(fill="x")
+
+        tb.Label(frm_scheme, text="方案：", font=("Microsoft JhengHei", 11)).pack(side="left", padx=(0, 4))
+        self.script_var = tk.StringVar()
+        self.script_menu = tb.Combobox(frm_scheme, textvariable=self.script_var, width=24, state="readonly")
+        self.script_menu.pack(side="left", padx=(0, 4))
+        self.refresh_script_menu()
+        self.script_menu.bind("<<ComboboxSelected>>", self.on_script_select)
+
+        # 新增：儲存按鈕（在下拉選單右邊）
+        btn_scheme_save = tb.Button(frm_scheme, text="儲存", width=8, bootstyle=SUCCESS, command=self.save_actions)
+        btn_scheme_save.pack(side="left", padx=(0, 8))
+
+        tb.Label(frm_scheme, text="修改名稱：", font=("Microsoft JhengHei", 11)).pack(side="left", padx=(0, 4))
+        self.rename_var = tk.StringVar()
+        tb.Entry(frm_scheme, textvariable=self.rename_var, width=18).pack(side="left", padx=(0, 4))
+        tb.Button(frm_scheme, text="修改", width=8, bootstyle=WARNING, command=self.rename_script).pack(side="left", padx=(0, 4))
+
         # ====== 主區塊：動作表格與日誌 ======
         frm_main = tb.Frame(self, padding=(10, 5, 10, 5))
         frm_main.pack(fill="both", expand=True)
@@ -239,6 +259,13 @@ class ChroLens_SothothApp(tb.Window):
         except Exception as e:
             print(f"全域快捷鍵註冊失敗: {e}")
 
+        # 在 __init__ 結尾，註冊錄製/停止錄製快捷鍵
+        try:
+            keyboard.add_hotkey('F10', lambda: self.start_record_script(self.script_var), suppress=False)
+            keyboard.add_hotkey('F9', lambda: self.stop_record_script(), suppress=False)
+        except Exception as e:
+            print(f"錄製快捷鍵註冊失敗: {e}")
+
         self.update_tree()
         self.update_idletasks()
         self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
@@ -252,8 +279,10 @@ class ChroLens_SothothApp(tb.Window):
         os.startfile(folder)
         self.log("開啟圖庫資料夾")
 
+    # 方案選單只顯示方案檔案
     def refresh_script_menu(self):
-        scripts = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
+        scripts = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR)
+                if f.endswith(".json") and f.startswith("p_")]
         self.script_menu["values"] = scripts
         if scripts:
             self.script_var.set(scripts[0])
@@ -268,7 +297,7 @@ class ChroLens_SothothApp(tb.Window):
     def load_script(self, script_name):
         path = os.path.join(SCRIPTS_DIR, script_name + ".json")
         if not os.path.exists(path):
-            messagebox.showerror("錯誤", f"找不到腳本檔案：{script_name}")
+            messagebox.showerror("錯誤", f"找不到方案檔案：{script_name}")
             return
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -285,9 +314,9 @@ class ChroLens_SothothApp(tb.Window):
                 item.get("loop_detect", False)
             )
             self.actions.append(act)
-            self.tree.insert("", "end", values=(len(self.actions), act.pic_key, act.action, f"{act.delay:.1f}"))
+            self.tree.insert("", "end", values=(len(self.actions), act.pic_key, "Script" if act.action.startswith("[SCRIPT]") else act.action, f"{act.delay:.1f}"))
         self.script_var.set(script_name)
-        self.log(f"載入腳本：{script_name}")
+        self.log(f"載入方案：{script_name}")
 
     def update_tree(self):
         self.tree.delete(*self.tree.get_children())
@@ -439,7 +468,8 @@ class ChroLens_SothothApp(tb.Window):
         frm_script.pack(fill="x", padx=10, pady=(30, 0))
         tb.Label(frm_script, text="Script", width=6, anchor="w").pack(side="left")
         script_var = tk.StringVar(value=script_init)
-        script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
+        script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR)
+                        if f.endswith(".json") and f.startswith("script_")]
         script_combo = tb.Combobox(frm_script, textvariable=script_var, values=script_files, width=20, state="readonly")
         script_combo.pack(side="left", fill="x", expand=True)
 
@@ -495,7 +525,7 @@ class ChroLens_SothothApp(tb.Window):
         def trigger_stop_record():
             self.stop_record_script()
 
-        # 註冊快捷鍵（只在本視窗存活時）
+        # 註冊全域快捷鍵（只要視窗存在就有效）
         try:
             record_hotkey = keyboard.add_hotkey(record_hotkey_str, trigger_record, suppress=False)
         except Exception as e:
@@ -509,6 +539,21 @@ class ChroLens_SothothApp(tb.Window):
 
         tb.Button(frm_record, text=f"錄製({record_hotkey_str})", width=14, bootstyle=PRIMARY, command=trigger_record).pack(side="left", padx=(0, 8))
         tb.Button(frm_record, text=f"停止錄製({stop_hotkey_str})", width=14, bootstyle=WARNING, command=trigger_stop_record).pack(side="left")
+
+        def on_close():
+            try:
+                keyboard.remove_hotkey(record_hotkey)
+            except Exception:
+                pass
+            try:
+                keyboard.remove_hotkey(stop_hotkey)
+            except Exception:
+                pass
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", on_close)
+        win.grab_set()
+
         def on_ok():
             # 只會擇一
             key_action = key_var.get().strip()
@@ -527,20 +572,6 @@ class ChroLens_SothothApp(tb.Window):
             self.log(f"編輯動作：{act.action} 延遲{act.delay}秒")
 
         tb.Button(win, text="確定", bootstyle=SUCCESS, width=12, command=on_ok).pack(pady=30)
-
-        def on_close():
-            try:
-                keyboard.remove_hotkey(record_hotkey)
-            except Exception:
-                pass
-            try:
-                keyboard.remove_hotkey(stop_hotkey)
-            except Exception:
-                pass
-            win.destroy()
-
-        win.protocol("WM_DELETE_WINDOW", on_close)
-        win.grab_set()
 
     def edit_delay_tree(self, act, idx):
         win = tk.Toplevel(self)
@@ -1007,13 +1038,11 @@ class ChroLens_SothothApp(tb.Window):
         if not self.actions:
             messagebox.showinfo("提示", "目前沒有動作可存檔")
             return
-        # 取得目前腳本名稱，預設填入
         current_name = self.script_var.get()
-        name = simpledialog.askstring("存檔", "請輸入檔案名稱：", initialvalue=current_name)
+        name = simpledialog.askstring("存檔", "請輸入方案名稱：", initialvalue=current_name)
         if not name:
             return
         save_path = os.path.join(SCRIPTS_DIR, name + ".json")
-        # 直接覆蓋，不再提示重複
         data = [
             {
                 "pic_key": act.pic_key,
@@ -1030,7 +1059,7 @@ class ChroLens_SothothApp(tb.Window):
             json.dump(data, f, ensure_ascii=False, indent=2)
         self.refresh_script_menu()
         self.script_var.set(name)
-        self.log(f"儲存腳本：{name}")
+        self.log(f"儲存方案：{name}")
 
     def on_tree_delete(self, event):
         # 取得所有選取的項目
