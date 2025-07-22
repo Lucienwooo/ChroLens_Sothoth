@@ -3,6 +3,8 @@
 # row2: 主區塊（動作表格/Treeview、日誌顯示區）
 # row3: 下方執行區（重複次數、重複時間、回放速度、執行/停止按鈕、狀態顯示）
 # pyinstaller --onedir --noconsole ChroLens_Sothoth1.2.py
+# 抓取定點的圖片07/23
+
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
