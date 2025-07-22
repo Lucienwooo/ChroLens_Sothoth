@@ -163,8 +163,8 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_gallery.grid(row=0, column=0, padx=4)
         self.btn_script = tb.Button(frm_top, text="Script", width=8, bootstyle=INFO, command=self.open_script_merge)
         self.btn_script.grid(row=0, column=1, padx=4)
-        self.btn_save = tb.Button(frm_top, text="存檔", width=8, bootstyle=SUCCESS, command=self.save_actions)
-        self.btn_save.grid(row=0, column=2, padx=4)
+        self.btn_scheme = tb.Button(frm_top, text="方案", width=8, bootstyle=SUCCESS, command=self.open_scheme_folder)
+        self.btn_scheme.grid(row=0, column=2, padx=4)
         self.btn_add = tb.Button(frm_top, text="新增動作", width=16, bootstyle=PRIMARY, command=self.add_action)
         self.btn_add.grid(row=0, column=3, padx=4)
 
@@ -279,10 +279,17 @@ class ChroLens_SothothApp(tb.Window):
         os.startfile(folder)
         self.log("開啟圖庫資料夾")
 
+    # 新增：開啟方案資料夾
+    def open_scheme_folder(self):
+        folder = os.path.abspath(SCRIPTS_DIR)
+        os.startfile(folder)
+        self.log("開啟方案資料夾")
+
     # 方案選單只顯示方案檔案
+    # 只排除 script_ 開頭的 json
     def refresh_script_menu(self):
         scripts = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR)
-                if f.endswith(".json") and f.startswith("p_")]
+                   if f.endswith(".json") and f.startswith("p_")]
         self.script_menu["values"] = scripts
         if scripts:
             self.script_var.set(scripts[0])
@@ -294,7 +301,11 @@ class ChroLens_SothothApp(tb.Window):
         if name:
             self.load_script(name)
 
+    # 只允許載入 p_ 開頭
     def load_script(self, script_name):
+        if not script_name.startswith("p_"):
+            messagebox.showerror("錯誤", "只能載入以 p_ 開頭的方案檔案")
+            return
         path = os.path.join(SCRIPTS_DIR, script_name + ".json")
         if not os.path.exists(path):
             messagebox.showerror("錯誤", f"找不到方案檔案：{script_name}")
@@ -389,9 +400,8 @@ class ChroLens_SothothApp(tb.Window):
 
         # 1. 按鍵（只捕捉一個動作）
         frm_key = tb.Frame(win)
-        frm_key.pack(fill="x", padx=10, pady=(20, 0), anchor="w")  # 靠左
+        frm_key.pack(fill="x", padx=10, pady=(20, 0), anchor="w")
         tb.Label(frm_key, text="按鍵", width=6, anchor="w").pack(side="left", anchor="w")
-        # === 修正：分流初始化 ===
         if act.action.startswith("[SCRIPT]"):
             key_init = ""
             script_init = act.action.replace("[SCRIPT]", "")
@@ -401,7 +411,6 @@ class ChroLens_SothothApp(tb.Window):
         key_var = tk.StringVar(value=key_init)
         key_entry = tb.Entry(frm_key, textvariable=key_var, width=20, font=("Microsoft JhengHei", 12), state="readonly")
         key_entry.pack(side="left", fill="x", expand=True, anchor="w")
-        # 已移除延遲輸入框
 
         import keyboard as kb
         import threading
@@ -433,9 +442,8 @@ class ChroLens_SothothApp(tb.Window):
             threading.Thread(target=listen_key, daemon=True).start()
 
         key_entry.bind("<FocusIn>", on_focus_in)
-        key_entry.bind("<KeyPress>", lambda e: "break")  # 禁止手動輸入
+        key_entry.bind("<KeyPress>", lambda e: "break")
 
-        # 滑鼠事件（只捕捉一個動作）
         def on_mouse(event):
             key_entry.focus_set()
             key_entry.config(state="normal")
@@ -465,17 +473,17 @@ class ChroLens_SothothApp(tb.Window):
 
         # 2. Script
         frm_script = tb.Frame(win)
-        frm_script.pack(fill="x", padx=10, pady=(30, 0), anchor="w")  # 靠左
+        frm_script.pack(fill="x", padx=10, pady=(30, 0), anchor="w")
         tb.Label(frm_script, text="Script", width=6, anchor="w").pack(side="left", anchor="w")
         script_var = tk.StringVar(value=script_init)
         script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR)
-                        if f.endswith(".json") and f.startswith("script_")]
+                        if f.endswith(".json") and f.startswith("s_")]
         script_combo = tb.Combobox(frm_script, textvariable=script_var, values=script_files, width=20, state="readonly")
         script_combo.pack(side="left", fill="x", expand=True, anchor="w")
 
         # === 新增：腳本名稱修改框與按鈕 ===
         frm_rename = tb.Frame(win)
-        frm_rename.pack(fill="x", padx=10, pady=(10, 0), anchor="w")  # 靠左
+        frm_rename.pack(fill="x", padx=10, pady=(10, 0), anchor="w")
         rename_var = tk.StringVar()
         entry_rename = tb.Entry(frm_rename, textvariable=rename_var, width=20)
         entry_rename.pack(side="left", padx=4, anchor="w")
@@ -485,6 +493,9 @@ class ChroLens_SothothApp(tb.Window):
             if not old_name or not new_name:
                 messagebox.showinfo("提示", "請選擇腳本並輸入新名稱。")
                 return
+            # 強制補 s_ 前綴
+            if not new_name.startswith("s_"):
+                new_name = "s_" + new_name
             if not new_name.endswith('.json'):
                 new_name += '.json'
             old_path = os.path.join(SCRIPTS_DIR, old_name + ".json") if not old_name.endswith('.json') else os.path.join(SCRIPTS_DIR, old_name)
@@ -496,18 +507,18 @@ class ChroLens_SothothApp(tb.Window):
                 os.rename(old_path, new_path)
                 self.log(f"腳本已更名為：{new_name}")
                 # 重新整理下拉選單
-                script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
+                script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json") and f.startswith("s_")]
                 script_combo["values"] = script_files
                 script_var.set(os.path.splitext(new_name)[0])
             except Exception as e:
                 messagebox.showerror("錯誤", f"更名失敗: {e}")
-            rename_var.set("")  # 更名後清空輸入框
+            rename_var.set("")
         btn_rename = tb.Button(frm_rename, text="修改腳本名稱", command=do_rename, bootstyle=WARNING, width=12)
         btn_rename.pack(side="left", padx=4, anchor="w")
 
         # 3. 錄製快捷鍵
         frm_record = tb.Frame(win)
-        frm_record.pack(fill="x", padx=10, pady=(30, 0), anchor="w")  # 靠左
+        frm_record.pack(fill="x", padx=10, pady=(30, 0), anchor="w")
         import keyboard
 
         config_path = "hotkey_config.json"
@@ -525,13 +536,12 @@ class ChroLens_SothothApp(tb.Window):
         def trigger_stop_record():
             self.stop_record_script()
 
-        # === 恢復錄製與停止錄製按鈕 ===
         btn_record = tb.Button(frm_record, text=f"錄製({record_hotkey_str})", width=12, bootstyle=SUCCESS, command=trigger_record)
         btn_record.pack(side="left", padx=4, anchor="w")
         btn_stop_record = tb.Button(frm_record, text=f"停止錄製({stop_hotkey_str})", width=12, bootstyle=WARNING, command=trigger_stop_record)
         btn_stop_record.pack(side="left", padx=4, anchor="w")
 
-        # 註冊全域快捷鍵（只要視窗存在就有效）
+        # 只要視窗存在就註冊快捷鍵，關閉時自動移除
         record_hotkey = None
         stop_hotkey = None
         try:
@@ -560,23 +570,26 @@ class ChroLens_SothothApp(tb.Window):
         win.grab_set()
 
         def on_ok():
-            # 只會擇一
             key_action = key_var.get().strip()
             script_name = script_var.get().strip()
             if key_action:
                 act.action = key_action
-                # act.delay 不變
             elif script_name:
+                # 強制腳本名稱為 s_xxx 格式
+                if not script_name.startswith("s_"):
+                    script_name = "s_" + script_name
                 act.action = f"[SCRIPT]{script_name}"
-                # act.delay 不變
             else:
                 act.action = ""
-                # act.delay 不變
             win.destroy()
+            # 修正日誌顯示
+            if act.action.startswith("[SCRIPT]"):
+                log_name = act.action.replace("[SCRIPT]", "")
+            else:
+                log_name = act.action
             self.update_tree()
-            self.log(f"編輯動作：{act.action} 延遲{act.delay}秒")
+            self.log(f"編輯動作：{log_name} 延遲{act.delay}秒")
 
-        # === 確定按鈕置中 ===
         tb.Button(win, text="確定", bootstyle=SUCCESS, width=12, command=on_ok).pack(pady=30, anchor="center")
 
     def edit_delay_tree(self, act, idx):
@@ -753,7 +766,22 @@ class ChroLens_SothothApp(tb.Window):
                         script_path = os.path.join(SCRIPTS_DIR, script_name + ".json")
                         if os.path.exists(script_path):
                             with open(script_path, "r", encoding="utf-8") as f:
-                                macro = json.load(f)
+                                content = f.read()
+                                try:
+                                    macro = json.loads(content)
+                                except json.JSONDecodeError:
+                                    # 只取第一個合法陣列
+                                    import re
+                                    match = re.search(r'\[[\s\S]*?\]', content)
+                                    if match:
+                                        try:
+                                            macro = json.loads(match.group(0))
+                                        except Exception as e:
+                                            self.log(f"腳本格式錯誤：{script_name} ({e})")
+                                            continue
+                                    else:
+                                        self.log(f"腳本格式錯誤：{script_name}")
+                                        continue
                             base_time = macro[0]["time"] if macro else 0
                             t0 = time.time()
                             for e in macro:
@@ -929,7 +957,7 @@ class ChroLens_SothothApp(tb.Window):
         left_frame = tb.Frame(win)
         left_frame.pack(side="left", fill="y", padx=10, pady=10)
         tb.Label(left_frame, text="所有腳本", style="My.TLabel").pack()
-        script_files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
+        script_files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json") and f.startswith("s_")]
         script_names = [os.path.splitext(f)[0] for f in script_files]
         listbox_all = tk.Listbox(left_frame, selectmode="extended", width=28)
         for name in script_names:
@@ -990,7 +1018,7 @@ class ChroLens_SothothApp(tb.Window):
 
         def refresh_all_list():
             listbox_all.delete(0, tk.END)
-            script_files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
+            script_files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json") and f.startswith("s_")]
             script_names = [os.path.splitext(f)[0] for f in script_files]
             for name in script_names:
                 listbox_all.insert(tk.END, name)
@@ -1017,6 +1045,8 @@ class ChroLens_SothothApp(tb.Window):
             if not new_name:
                 messagebox.showerror("錯誤", "請輸入新腳本名稱")
                 return
+            if not new_name.startswith("s_"):
+                new_name = "s_" + new_name
             merged = []
             for name in merge_items:
                 path = os.path.join(SCRIPTS_DIR, name + ".json")
@@ -1045,9 +1075,11 @@ class ChroLens_SothothApp(tb.Window):
             messagebox.showinfo("提示", "目前沒有動作可存檔")
             return
         current_name = self.script_var.get()
-        name = simpledialog.askstring("存檔", "請輸入方案名稱：", initialvalue=current_name)
+        name = simpledialog.askstring("存檔", "請輸入方案名稱（不需加p_）：", initialvalue=current_name.replace("p_", ""))
         if not name:
             return
+        if not name.startswith("p_"):
+            name = "p_" + name
         save_path = os.path.join(SCRIPTS_DIR, name + ".json")
         data = [
             {
@@ -1201,7 +1233,6 @@ class ChroLens_SothothApp(tb.Window):
                     k_events = keyboard.stop_recording()
                 except KeyError:
                     k_events = []
-                # ...existing code...
                 filtered_k_events = k_events
                 events = [
                     {'type': 'keyboard', 'event': e.event_type, 'name': e.name, 'time': e.time}
@@ -1209,13 +1240,17 @@ class ChroLens_SothothApp(tb.Window):
                 ] + self._mouse_events
                 all_events = sorted(events, key=lambda e: e['time'])
                 # 存檔
-                ts = datetime.datetime.now().strftime("%Y_%m%d_%H%M_%S")
-                filename = f"script_{ts}.json"
+                name = script_var.get().strip()
+                if not name or not name.startswith("s_"):
+                    # 若未輸入名稱則自動產生
+                    ts = datetime.datetime.now().strftime("%Y_%m%d_%H%M_%S")
+                    name = f"s_{ts}"
+                filename = name + ".json"
                 save_path = os.path.join(SCRIPTS_DIR, filename)
                 with open(save_path, "w", encoding="utf-8") as f:
                     json.dump(all_events, f, ensure_ascii=False, indent=2)
                 # 更新下拉選單
-                script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json")]
+                script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json") and f.startswith("s_")]
                 script_var.set(os.path.splitext(filename)[0])
                 self.refresh_script_menu()
                 self.log(f"錄製Script已儲存：{filename}")
@@ -1253,10 +1288,10 @@ class ChroLens_SothothApp(tb.Window):
         if not old_name or not new_name:
             messagebox.showinfo("提示", "請選擇腳本並輸入新名稱。")
             return
-        if not new_name.endswith('.json'):
-            new_name += '.json'
+        if not new_name.startswith("p_"):
+            new_name = "p_" + new_name
         old_path = os.path.join(SCRIPTS_DIR, old_name + ".json") if not old_name.endswith('.json') else os.path.join(SCRIPTS_DIR, old_name)
-        new_path = os.path.join(SCRIPTS_DIR, new_name)
+        new_path = os.path.join(SCRIPTS_DIR, new_name + ".json")
         if os.path.exists(new_path):
             messagebox.showerror("錯誤", "檔案已存在，請換個名稱。")
             return
@@ -1264,7 +1299,7 @@ class ChroLens_SothothApp(tb.Window):
             os.rename(old_path, new_path)
             self.log(f"腳本已更名為：{new_name}")
             self.refresh_script_menu()
-            self.script_var.set(os.path.splitext(new_name)[0])
+            self.script_var.set(new_name)
         except Exception as e:
             messagebox.showerror("錯誤", f"更名失敗: {e}")
         self.rename_var.set("")  # 更名後清空輸入框
