@@ -26,6 +26,8 @@ import copy
 import ctypes
 import sys
 import pywinauto
+import requests
+import tempfile
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -509,7 +511,7 @@ class ChroLens_SothothApp(tb.Window):
                 os.rename(old_path, new_path)
                 self.log(f"腳本已更名為：{new_name}")
                 # 重新整理下拉選單
-                script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endswith(".json") and f.startswith("s_")]
+                script_files = [os.path.splitext(f)[0] for f in os.listdir(SCRIPTS_DIR) if f.endsWith(".json") and f.startswith("s_")]
                 script_combo["values"] = script_files
                 script_var.set(os.path.splitext(new_name)[0])
             except Exception as e:
@@ -597,7 +599,7 @@ class ChroLens_SothothApp(tb.Window):
     def edit_delay_tree(self, act, idx):
         win = tk.Toplevel(self)
         win.title("延遲設定")
-        win.geometry("340x300")  # 高度+50
+        win.geometry("340x340")  # 高度+50
         win.resizable(False, False)
 
         # 動作區塊
@@ -619,15 +621,38 @@ class ChroLens_SothothApp(tb.Window):
         entry_detect = tk.Entry(frm_img, textvariable=detect_wait_var, width=10, font=("Microsoft JhengHei", 12))
         entry_detect.pack(side="left", fill="x")
 
-        # 勾選框：偵測失敗自動繼續
-        stop_on_fail_var = tk.BooleanVar(value=getattr(act, "stop_on_fail", False))
-        chk1 = tk.Checkbutton(win, text="偵測失敗自動繼續", variable=stop_on_fail_var, font=("Microsoft JhengHei", 12))
-        chk1.pack(anchor="w", padx=30, pady=(10, 0))
+        # 單選框控制變數
+        detect_mode_var = tk.StringVar(value="auto_stop")
 
-        # 勾選框：循環偵測
-        loop_detect_var = tk.BooleanVar(value=getattr(act, "loop_detect", False))
-        chk2 = tk.Checkbutton(win, text="循環偵測", variable=loop_detect_var, font=("Microsoft JhengHei", 12))
-        chk2.pack(anchor="w", padx=30, pady=(2, 0))
+        # 偵測失敗自動停止（預設勾選）
+        rb0 = tk.Radiobutton(
+            win,
+            text="偵測失敗自動停止",
+            variable=detect_mode_var,
+            value="auto_stop",
+            font=("Microsoft JhengHei", 12)
+        )
+        rb0.pack(anchor="w", padx=30, pady=(10, 0))
+
+        # 偵測失敗自動繼續
+        rb1 = tk.Radiobutton(
+            win,
+            text="偵測失敗自動繼續",
+            variable=detect_mode_var,
+            value="continue",
+            font=("Microsoft JhengHei", 12)
+        )
+        rb1.pack(anchor="w", padx=30, pady=(2, 0))
+
+        # 循環偵測
+        rb2 = tk.Radiobutton(
+            win,
+            text="循環偵測",
+            variable=detect_mode_var,
+            value="loop",
+            font=("Microsoft JhengHei", 12)
+        )
+        rb2.pack(anchor="w", padx=30, pady=(2, 0))
 
         def on_ok():
             # 延遲秒數
@@ -642,8 +667,11 @@ class ChroLens_SothothApp(tb.Window):
                 act.detect_wait = detect_wait
             except Exception:
                 act.detect_wait = 0
-            act.stop_on_fail = stop_on_fail_var.get()
-            act.loop_detect = loop_detect_var.get()
+            # 根據單選框設定動作屬性
+            mode = detect_mode_var.get()
+            act.stop_on_fail = (mode == "continue")
+            act.loop_detect = (mode == "loop")
+            # auto_stop 不需特別寫入，因為預設就是這個行為
             self.update_tree()
             self.log(f"編輯延遲：{act.pic_key} - {act.action} - {act.delay}秒")
             win.destroy()
@@ -651,6 +679,7 @@ class ChroLens_SothothApp(tb.Window):
         btn = tb.Button(win, text="確定", bootstyle=SUCCESS, width=10, command=on_ok)
         btn.pack(pady=18)
         win.grab_set()
+
 
     def add_action_direct(self):
         pass
@@ -1357,12 +1386,45 @@ def locate_image_with_sift(template_path, confidence=0.8):
         return (x, y)
     return None
 
+APP_VERSION = "1.2.0"  # ⚠️ 每次更新時記得手動改這裡
+LATEST_JSON_URL = "https://raw.githubusercontent.com/你的帳號/你的repo/main/latest_version.json"  # TODO: 改成你的網址
+
+def check_and_update():
+    try:
+        r = requests.get(LATEST_JSON_URL, timeout=5)
+        r.raise_for_status()
+        latest = r.json()
+        latest_version = latest.get("version", "")
+        download_url = latest.get("url", "")
+
+        if not latest_version or not download_url:
+            print("更新檢查失敗：資料缺失")
+            return
+
+        if latest_version > APP_VERSION:
+            answer = messagebox.askyesno("更新提示", f"檢測到新版本 {latest_version}，是否下載更新？")
+            if answer:
+                tmp_path = os.path.join(tempfile.gettempdir(), "ChroLens_Sothoth_new.exe")
+                with requests.get(download_url, stream=True) as r2:
+                    r2.raise_for_status()
+                    with open(tmp_path, "wb") as f:
+                        for chunk in r2.iter_content(chunk_size=8192):
+                            f.write(chunk)
+
+                messagebox.showinfo("更新完成", "已下載更新，即將重啟程式完成更新。")
+                os.startfile(tmp_path)
+                sys.exit(0)
+
+    except Exception as e:
+        print(f"檢查更新錯誤：{e}")
+
 try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # 讓程式支援高DPI
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
     pass
 
 
 if __name__ == "__main__":
+    check_and_update()
     app = ChroLens_SothothApp()
     app.mainloop()
