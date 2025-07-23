@@ -4,6 +4,8 @@
 # row3: 下方執行區（重複次數、重複時間、回放速度、執行/停止按鈕、狀態顯示）
 # pyinstaller --onedir --noconsole ChroLens_Sothoth1.2.py
 # 抓取定點的圖片07/23
+# 偵測失敗不動作，進入下一步
+# 偵測邏輯需要更新07/23
 
 
 import ttkbootstrap as tb
