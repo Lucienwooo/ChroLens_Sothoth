@@ -210,10 +210,10 @@ class ChroLens_SothothApp(tb.Window):
         self.tree.heading("pic_key", text="圖片名稱")
         self.tree.heading("action", text="動作")
         self.tree.heading("delay", text="延遲(秒)")
-        self.tree.column("#", width=40, anchor="center")
-        self.tree.column("pic_key", width=180, anchor="w")
-        self.tree.column("action", width=100, anchor="center")
-        self.tree.column("delay", width=80, anchor="center")
+        self.tree.column("#", width=80, anchor="center")  # 原本40，*2
+        self.tree.column("pic_key", width=360, anchor="w")  # 原本180，*2
+        self.tree.column("action", width=200, anchor="center")  # 原本100，*2
+        self.tree.column("delay", width=160, anchor="center")  # 原本80，*2
         self.tree.pack(fill="y", expand=False, pady=4)
         self.tree.bind("<Double-1>", self.on_tree_edit)
         self.tree.bind("<Button-1>", self.on_tree_click)
@@ -225,7 +225,7 @@ class ChroLens_SothothApp(tb.Window):
 
         frm_log = tb.Frame(frm_main)
         frm_log.pack(side="left", fill="both", expand=True, padx=(10,0))
-        self.log_text = tb.Text(frm_log, height=18, width=50, state="disabled", font=("Microsoft JhengHei", 9))
+        self.log_text = tb.Text(frm_log, height=18, width=25, state="disabled", font=("Microsoft JhengHei", 9))  # 原本width=50，改為25
         self.log_text.pack(fill="both", expand=True, pady=(4,0))
 
         # ====== 下方執行區 ======
@@ -671,7 +671,7 @@ class ChroLens_SothothApp(tb.Window):
                 act.detect_wait = 0
             # 根據單選框設定動作屬性
             mode = detect_mode_var.get()
-            act.stop_on_fail = (mode == "continue")
+            act.stop_on_fail = (mode == "auto_stop")
             act.loop_detect = (mode == "loop")
             # auto_stop 不需特別寫入，因為預設就是這個行為
             self.update_tree()
