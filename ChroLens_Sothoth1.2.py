@@ -6,7 +6,7 @@
 # 抓取定點的圖片07/23
 # 偵測失敗不動作，進入下一步
 # 偵測邏輯需要更新07/23
-
+# pip install ttkbootstrap pyautogui opencv-python numpy imutils keyboard mouse pywinauto requests pynput
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
