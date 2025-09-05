@@ -4,9 +4,7 @@
 # row3: 下方執行區（重複次數、重複時間、回放速度、執行/停止按鈕、狀態顯示）
 # pyinstaller --onedir --noconsole ChroLens_Sothoth1.2.py
 # 抓取定點的圖片07/23
-# 偵測失敗不動作，進入下一步
-# 偵測邏輯需要更新07/23
-# pip install ttkbootstrap pyautogui opencv-python numpy imutils keyboard mouse pywinauto requests pynput
+
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
@@ -28,8 +26,6 @@ import copy
 import ctypes
 import sys
 import pywinauto
-import requests
-import tempfile
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -151,9 +147,6 @@ def mouse_event_win(event, x=0, y=0, button='left', delta=0):
         user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
 
 class ChroLens_SothothApp(tb.Window):
-    APP_VERSION = "1.2.0"  # ⚠️ 每次更新時記得手動改這裡
-    LATEST_JSON_URL = "https://raw.githubusercontent.com/Lucienwooo/ChroLens_Sothoth/main/latest_version.json"  # TODO: 改成你的網址
-
     def __init__(self):
         super().__init__(themename="superhero")
         self.title("ChroLens_Sothoth1.2")
@@ -162,6 +155,8 @@ class ChroLens_SothothApp(tb.Window):
         self.pic_map = {}
         self.drag_data = {"item": None, "index": None}
         self._stop_flag = threading.Event()
+
+
 
         # ====== 上方操作區 ======
         frm_top = tb.Frame(self, padding=(10, 10, 10, 5))
@@ -174,11 +169,10 @@ class ChroLens_SothothApp(tb.Window):
         self.btn_scheme.grid(row=0, column=2, padx=4)
         self.btn_add = tb.Button(frm_top, text="新增動作", width=16, bootstyle=PRIMARY, command=self.add_action)
         self.btn_add.grid(row=0, column=3, padx=4)
+
+        # ====== 新增：快捷鍵設定按鈕（加在最右邊） ======
         self.btn_hotkey = tb.Button(frm_top, text="快捷鍵", width=8, bootstyle=SECONDARY, command=self.open_hotkey_settings)
         self.btn_hotkey.grid(row=0, column=10, padx=4, sticky="e")
-        # ====== 新增：關於按鈕（在快捷鍵右邊） ======
-        self.btn_about = tb.Button(frm_top, text="關於", width=8, bootstyle=SECONDARY, command=self.show_about_dialog)
-        self.btn_about.grid(row=0, column=11, padx=4, sticky="e")
 
         # ====== row1: 方案選單區 ======
         frm_scheme = tb.Frame(self, padding=(10, 0, 10, 5))
@@ -212,10 +206,10 @@ class ChroLens_SothothApp(tb.Window):
         self.tree.heading("pic_key", text="圖片名稱")
         self.tree.heading("action", text="動作")
         self.tree.heading("delay", text="延遲(秒)")
-        self.tree.column("#", width=80, anchor="center")  # 原本40，*2
-        self.tree.column("pic_key", width=360, anchor="w")  # 原本180，*2
-        self.tree.column("action", width=200, anchor="center")  # 原本100，*2
-        self.tree.column("delay", width=160, anchor="center")  # 原本80，*2
+        self.tree.column("#", width=40, anchor="center")
+        self.tree.column("pic_key", width=180, anchor="w")
+        self.tree.column("action", width=100, anchor="center")
+        self.tree.column("delay", width=80, anchor="center")
         self.tree.pack(fill="y", expand=False, pady=4)
         self.tree.bind("<Double-1>", self.on_tree_edit)
         self.tree.bind("<Button-1>", self.on_tree_click)
@@ -227,7 +221,7 @@ class ChroLens_SothothApp(tb.Window):
 
         frm_log = tb.Frame(frm_main)
         frm_log.pack(side="left", fill="both", expand=True, padx=(10,0))
-        self.log_text = tb.Text(frm_log, height=18, width=25, state="disabled", font=("Microsoft JhengHei", 9))  # 原本width=50，改為25
+        self.log_text = tb.Text(frm_log, height=18, width=50, state="disabled", font=("Microsoft JhengHei", 9))
         self.log_text.pack(fill="both", expand=True, pady=(4,0))
 
         # ====== 下方執行區 ======
@@ -382,23 +376,26 @@ class ChroLens_SothothApp(tb.Window):
         )
         if not img_path:
             return
-        pic_num = idx + 1
         base_name = os.path.basename(img_path)
-        name8 = os.path.splitext(base_name)[0][:8]
-        ext = os.path.splitext(base_name)[1]
-        pic_key = f"pic{pic_num}_{name8}"
-        save_name = f"{pic_key}{ext}"
-        save_path = os.path.join(IMAGE_DIR, save_name)
-        # 無論是否存在都覆蓋
+        save_path = os.path.join(IMAGE_DIR, base_name)
+        # 判斷是否已在圖庫內
+        if os.path.abspath(os.path.dirname(img_path)) == os.path.abspath(IMAGE_DIR) or os.path.exists(save_path):
+            # 已在圖庫或圖庫已有同名檔案，不複製
+            act.img_path = img_path
+            act.pic_key = os.path.splitext(base_name)[0]
+            self.update_tree()
+            self.log(f"選取圖庫圖片：{act.pic_key}")
+            return
+        # 否則複製到圖庫
         try:
             shutil.copy(img_path, save_path)
         except Exception as e:
             messagebox.showerror("錯誤", f"圖片複製失敗: {e}")
             return
-        act.pic_key = pic_key
         act.img_path = save_path
+        act.pic_key = os.path.splitext(base_name)[0]
         self.update_tree()
-        self.log(f"編輯圖片：{pic_key}")
+        self.log(f"新增圖片：{act.pic_key}")
 
     def edit_action(self, act, idx):
         win = tk.Toplevel(self)
@@ -673,7 +670,7 @@ class ChroLens_SothothApp(tb.Window):
                 act.detect_wait = 0
             # 根據單選框設定動作屬性
             mode = detect_mode_var.get()
-            act.stop_on_fail = (mode == "auto_stop")
+            act.stop_on_fail = (mode == "continue")
             act.loop_detect = (mode == "loop")
             # auto_stop 不需特別寫入，因為預設就是這個行為
             self.update_tree()
@@ -1332,13 +1329,11 @@ class ChroLens_SothothApp(tb.Window):
             return
         try:
             os.rename(old_path, new_path)
+            self.log(f"腳本已更名為：{new_name}")
+            self.refresh_script_menu()
+            self.script_var.set(new_name)
         except Exception as e:
             messagebox.showerror("錯誤", f"更名失敗: {e}")
-            return
-        # 檔案更名成功後，更新 UI
-        self.log(f"腳本已更名為：{new_name}")
-        self.refresh_script_menu()
-        self.script_var.set(new_name)
         self.rename_var.set("")  # 更名後清空輸入框
 
     def stop_actions(self):
@@ -1370,66 +1365,6 @@ class ChroLens_SothothApp(tb.Window):
         # 3. 原本的圖片比對
         return locate_image_on_screen(template_path, confidence)
 
-    def show_about_dialog(self):
-        about_win = tb.Toplevel(self)
-        about_win.title("關於 ChroLens_Sothoth")
-        about_win.geometry("450x340")
-        about_win.resizable(False, False)
-        about_win.grab_set()
-        # 置中顯示
-        self.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width() // 2) - 175
-        y = self.winfo_y() + 80
-        about_win.geometry(f"+{x}+{y}")
-
-        frm = tb.Frame(about_win, padding=20)
-        frm.pack(fill="both", expand=True)
-
-        tb.Label(frm, text="ChroLens_Sothoth\n可理解為自動化腳本/圖片偵測/掛機工具\n解決重複性高的作業或動作", font=("Microsoft JhengHei", 11,)).pack(anchor="w", pady=(0, 6))
-        link = tk.Label(frm, text="ChroLens_模擬器討論區", font=("Microsoft JhengHei", 10, "underline"), fg="#5865F2", cursor="hand2")
-        link.pack(anchor="w")
-        link.bind("<Button-1>", lambda e: os.startfile("https://discord.gg/72Kbs4WPPn"))
-        github = tk.Label(frm, text="查看更多工具(巴哈)", font=("Microsoft JhengHei", 10, "underline"), fg="#24292f", cursor="hand2")
-        github.pack(anchor="w", pady=(8, 0))
-        github.bind("<Button-1>", lambda e: os.startfile("https://home.gamer.com.tw/profile/index_creation.php?owner=umiwued&folder=523848"))
-        tb.Label(frm, text="Creat By Lucienwooo", font=("Microsoft JhengHei", 11,)).pack(anchor="w", pady=(0, 6))
-        # 關於底下新增「檢查更新」文字
-        check_update_label = tk.Label(frm, text="檢查更新", font=("Microsoft JhengHei", 11, "underline"), fg="#15D3BD", cursor="hand2")
-        check_update_label.pack(anchor="e", pady=(16, 0))
-        check_update_label.bind("<Button-1>", lambda e: self.check_update_dialog(about_win))
-
-        tb.Button(frm, text="關閉", command=about_win.destroy, width=8, bootstyle=SECONDARY).pack(anchor="e", pady=(16, 0))
-
-    def check_update_dialog(self, parent=None):
-        import requests, tempfile
-        try:
-            r = requests.get(LATEST_JSON_URL, timeout=5)
-            r.raise_for_status()
-            latest = r.json()
-            latest_version = latest.get("version", "")
-            download_url = latest.get("url", "")
-
-            if not latest_version or not download_url:
-                messagebox.showinfo("檢查更新", "更新檢查失敗：資料缺失", parent=parent)
-                return
-
-            if latest_version > APP_VERSION:
-                answer = messagebox.askyesno("檢查更新", f"檢測到新版本 {latest_version}，是否下載更新？", parent=parent)
-                if answer:
-                    tmp_path = os.path.join(tempfile.gettempdir(), "ChroLens_Sothoth_new.exe")
-                    with requests.get(download_url, stream=True) as r2:
-                        r2.raise_for_status()
-                        with open(tmp_path, "wb") as f:
-                            for chunk in r2.iter_content(chunk_size=8192):
-                                f.write(chunk)
-                    messagebox.showinfo("更新完成", "已下載更新，即將重啟程式完成更新。", parent=parent)
-                    os.startfile(tmp_path)
-                    sys.exit(0)
-            else:
-                messagebox.showinfo("檢查更新", f"目前已是最新版本：{APP_VERSION}", parent=parent)
-        except Exception as e:
-            messagebox.showerror("檢查更新", f"檢查更新錯誤：{e}", parent=parent)
-
 def locate_image_with_sift(template_path, confidence=0.8):
     import cv2
     screenshot = pyautogui.screenshot()
@@ -1452,40 +1387,8 @@ def locate_image_with_sift(template_path, confidence=0.8):
         return (x, y)
     return None
 
-APP_VERSION = "1.2.0"  # ⚠️ 每次更新時記得手動改這裡
-LATEST_JSON_URL = "https://raw.githubusercontent.com/你的帳號/你的repo/main/latest_version.json"  # TODO: 改成你的網址
-
-def check_and_update():
-    try:
-        r = requests.get(LATEST_JSON_URL, timeout=5)
-        r.raise_for_status()
-        latest = r.json()
-        latest_version = latest.get("version", "")
-        download_url = latest.get("url", "")
-
-        if not latest_version or not download_url:
-            print("更新檢查失敗：資料缺失")
-            return
-
-        if latest_version > APP_VERSION:
-            answer = messagebox.askyesno("更新提示", f"檢測到新版本 {latest_version}，是否下載更新？")
-            if answer:
-                tmp_path = os.path.join(tempfile.gettempdir(), "ChroLens_Sothoth_new.exe")
-                with requests.get(download_url, stream=True) as r2:
-                    r2.raise_for_status()
-                    with open(tmp_path, "wb") as f:
-                        for chunk in r2.iter_content(chunk_size=8192):
-                            f.write(chunk)
-
-                messagebox.showinfo("更新完成", "已下載更新，即將重啟程式完成更新。")
-                os.startfile(tmp_path)
-                sys.exit(0)
-
-    except Exception as e:
-        print(f"檢查更新錯誤：{e}")
-
 try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # 讓程式支援高DPI
 except Exception:
     pass
 
